@@ -4,6 +4,8 @@ A web mini game for the Sky's The Limit 2026 (Cloud9 x JetBrains) hackathon. Eac
 1vN clutch from pro VALORANT (2025-2026), rebuilt on an original 2D map: you take over the clutcher
 while 2-3 enemies move on rails derived from GRID data plus a bot state machine.
 
+**Play it:** https://relive-the-round.vercel.app
+
 ## Layout
 
 - `etl/` - Python (uv) pipeline: reads GRID feeds, finds clutches, builds levels.
