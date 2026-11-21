@@ -8,7 +8,14 @@ while 2-3 enemies move on rails derived from GRID data plus a bot state machine.
 
 - `etl/` - Python (uv) pipeline: reads GRID feeds, finds clutches, builds levels.
 - `docs/` - notes and reports (aggregates only).
-- `web/` - game client (PixiJS), not started yet.
+- `web/` - game client (PixiJS): playable levels, side-by-side replay, shareable score card.
+
+## Maps
+
+- Kiln - haven levels.
+- Cistern (`web/src/maps/cistern.ts`) - lotus levels. Cistern is an original map: original
+  geometry, with the layout warped from aggregate player position density. No Riot map art or
+  geometry is used.
 
 ## Data
 
