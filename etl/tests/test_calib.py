@@ -72,6 +72,15 @@ def test_diffuse_centroids_are_not_landmarks() -> None:
     assert "def-spawn (p50 radius" in render_doc(anchors)
 
 
+def test_render_doc_target_name_defaults_to_kiln() -> None:
+    anchors, _ = build_anchors("lotus", [], [])
+    default = render_doc(anchors)
+    assert "lotus -> Kiln" in default and "web/src/maps/kiln.ts" in default
+    doc = render_doc(anchors, "Cistern")
+    assert "lotus -> Cistern" in doc and "web/src/maps/cistern.ts" in doc
+    assert "Kiln" not in doc and doc.count("Cistern") == 4
+
+
 def test_raster_extent_trims_outliers() -> None:
     pts = [(0.3 + 0.004 * i, 0.6) for i in range(100)] + [(0.95, 0.6)]
     ext = raster_extent(density_raster(pts, 100), lo=0.01, hi=0.99)
