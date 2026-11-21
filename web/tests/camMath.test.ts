@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import {
   type Bounds,
@@ -116,5 +117,46 @@ describe("camera math", () => {
 
   it("fitCamera is deterministic", () => {
     for (const aspect of ASPECTS) expect(fitCamera(MAP, aspect)).toEqual(fitCamera(MAP, aspect));
+  });
+
+  const WIDE: Bounds = { minX: 0, minY: 0, maxX: 8000, maxY: 3000 };
+  const TALL: Bounds = { minX: 0, minY: 0, maxX: 3000, maxY: 8000 };
+  const CASES = [MAP, WIDE, TALL].flatMap((b) => [1, 3, 1 / 3].map((a) => [b, a] as const));
+
+  it.each(CASES)("fitCamera fits non-square bounds tight: %o at aspect %f", (bounds, aspect) => {
+    const cam = fitCamera(bounds, aspect);
+    let worst = 0;
+    for (const c of corners(bounds)) {
+      const p = project(cam, toGround(c))!;
+      expect(Math.abs(p.x)).toBeLessThanOrEqual(1 - MARGIN + 1e-9);
+      expect(Math.abs(p.y)).toBeLessThanOrEqual(1 - MARGIN + 1e-9);
+      worst = Math.max(worst, Math.abs(p.x), Math.abs(p.y));
+    }
+    expect(Math.abs(worst - (1 - MARGIN))).toBeLessThan(1e-3);
+  });
+
+  it.each(CASES)("pitch is CAMERA_PITCH_DEG, computed independently: %o at aspect %f", (bounds, aspect) => {
+    const cam = fitCamera(bounds, aspect);
+    const d = cam.target.map((t, i) => t - cam.position[i]!);
+    const pitch = (Math.asin(-d[1]! / Math.hypot(d[0]!, d[1]!, d[2]!)) * 180) / Math.PI;
+    expect(pitch).toBeCloseTo(CAMERA_PITCH_DEG, 9);
+  });
+
+  it.each(CASES)("a THREE.PerspectiveCamera from the fit agrees with project: %o at aspect %f", (bounds, aspect) => {
+    const fit = fitCamera(bounds, aspect);
+    const cam = new THREE.PerspectiveCamera(fit.fovDeg, fit.aspect, fit.near, fit.far);
+    cam.position.set(...fit.position);
+    cam.lookAt(...fit.target);
+    cam.updateMatrixWorld();
+    const t = new THREE.Vector3(...fit.target).project(cam);
+    expect(t.x).toBeCloseTo(0, 9);
+    expect(t.y).toBeCloseTo(0, 9);
+    for (const c of corners(bounds)) {
+      const v = new THREE.Vector3(...toGround(c)).project(cam);
+      const p = project(fit, toGround(c))!;
+      expect(v.x).toBeCloseTo(p.x, 6);
+      expect(v.y).toBeCloseTo(p.y, 6);
+      expect(Math.abs(v.z)).toBeLessThan(1);
+    }
   });
 });

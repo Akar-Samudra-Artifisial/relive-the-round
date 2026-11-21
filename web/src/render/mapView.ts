@@ -3,14 +3,18 @@ import type { MapDef } from "../maps/types";
 import { polygonCentroid, type Polygon } from "../sim/geom";
 import { DISPLAY_FONT, MONO_FONT } from "../ui/fonts";
 import { THEME_NUM } from "../ui/theme";
+import {
+  ATTACK_TINT,
+  DEFENSE_TINT,
+  FLOOR,
+  GRID_MAJOR,
+  GRID_MINOR,
+  SITE_LABEL_SIZE,
+  spawnLabelSize,
+  WALL_FILL,
+} from "./palette";
 
-/** Map palette (Tactical HUD): dark floor, raised walls with a thin cyan edge, amber sites. */
-const FLOOR = 0x070b10;
-const GRID_MINOR = 400;
-const GRID_MAJOR = 2000;
-const WALL_FILL = 0x111b25;
-const ATTACK_TINT = THEME_NUM.red;
-const DEFENSE_TINT = THEME_NUM.green;
+export { spawnLabelSize };
 
 export function drawPoly(g: Graphics, poly: Polygon): Graphics {
   return g.poly([...poly]);
@@ -58,16 +62,6 @@ export type DrawMapOptions = {
   readonly cssPxPerUnit?: number;
 };
 
-/** Spawn labels never render below this many CSS px. */
-const MIN_LABEL_CSS_PX = 10;
-const SPAWN_LABEL_SIZE = 150;
-
-/** Spawn label font size (world units): the design size, raised so it is ≥ MIN_LABEL_CSS_PX on screen. */
-export function spawnLabelSize(cssPxPerUnit: number | undefined): number {
-  if (!(cssPxPerUnit !== undefined && cssPxPerUnit > 0)) return SPAWN_LABEL_SIZE;
-  return Math.max(SPAWN_LABEL_SIZE, Math.ceil(MIN_LABEL_CSS_PX / cssPxPerUnit));
-}
-
 /** Static map layer: floor + grid, spawns, sites, walls and labels (world units). */
 export function drawMap(map: MapDef, opts: DrawMapOptions = {}): Container {
   const c = new Container();
@@ -102,7 +96,7 @@ export function drawMap(map: MapDef, opts: DrawMapOptions = {}): Container {
     const p = polygonCentroid(site);
     const t = new Text({
       text: name,
-      style: { fill: THEME_NUM.amber, fontFamily: DISPLAY_FONT, fontSize: 380, fontWeight: "700" },
+      style: { fill: THEME_NUM.amber, fontFamily: DISPLAY_FONT, fontSize: SITE_LABEL_SIZE, fontWeight: "700" },
     });
     t.anchor.set(0.5);
     t.alpha = 0.55;

@@ -141,15 +141,24 @@ function randomSeed(): number {
   return a[0]!;
 }
 
+/** Lazily loads the three.js renderer; any import or WebGL init error warns once and falls back to Pixi 2D. */
+async function create3dOr2d(size: number): Promise<GameRenderer> {
+  try {
+    const { createThree3dRenderer } = await import("../render/three3d/three3d");
+    return await createThree3dRenderer({ width: size, height: size });
+  } catch (err) {
+    console.warn("[renderer] 3D unavailable, falling back to 2D", err);
+    return createPixi2dRenderer({ width: size, height: size });
+  }
+}
+
 export async function startGame(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const auto = params.has("auto");
   const showFps = auto || params.has("fps");
   const fixedSeed = params.get("seed");
   const kiosk = parseKiosk(location.search);
-  // Phase 3: the pick is computed but only logged; the Pixi 2D renderer is always used for now.
   const rendererPick = pickRenderer(location.search, detectCaps());
-  if (rendererPick.kind === "3d") console.info("[renderer] 3D renderer is not implemented yet; using 2D");
 
   const loaded: LoadedLevel[] = await Promise.all(FEATURED.map(loadFeatured));
   const worlds = new Map<LoadedLevel, World>(loaded.map((l) => [l, buildWorld(mapFor(l.level.map), l.level)]));
@@ -165,7 +174,8 @@ export async function startGame(): Promise<void> {
   const stageEl = el<HTMLDivElement>("gameStage");
   // Leaves room for the HUD strip above the canvas; CSS scales the canvas down on narrow screens.
   const size = Math.max(480, Math.min(innerWidth - 24, innerHeight - 104));
-  const renderer: GameRenderer = await createPixi2dRenderer({ width: size, height: size });
+  const renderer: GameRenderer =
+    rendererPick.kind === "3d" ? await create3dOr2d(size) : await createPixi2dRenderer({ width: size, height: size });
   stageEl.appendChild(renderer.canvas);
 
   const attract = el<HTMLDivElement>("attract");
