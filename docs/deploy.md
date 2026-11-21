@@ -39,37 +39,55 @@ QR, the replay and the card download with the browser console open: there must b
 
 ## Environment
 
-- `VITE_PUBLIC_URL` (optional) — base URL encoded in share links and the score-card QR. Leave it
-  unset on Vercel: the app then uses `location.origin`, which is the deployment URL. Set it only to
-  force a stable alias, e.g. in the project's Preview env or inline: `VITE_PUBLIC_URL=https://… vercel build`.
+- `VITE_PUBLIC_URL` — base URL encoded in share links and the score-card QR. If unset, the app
+  uses `location.origin` (the deployment URL). The project's **Production** env sets it to
+  `https://relive-the-round.vercel.app`, so it only reaches the bundle when you run
+  `vercel pull --environment=production` before `vercel build --prod`.
 - `.vercel/` (project link, pulled env, build output) is git-ignored.
 
-## Steps (preview first, personal scope)
+## Project
+
+- Scope: the Hobby account `kaktua` (a Hobby "team" is a personal account; it cannot have members).
+- Project: `relive-the-round`, no Git integration. Production alias: `https://relive-the-round.vercel.app`.
+
+## Steps
 
 Run everything from `web/` with the data present in `../data/levels/`.
 
+First-time link (already done; only needed on a fresh checkout):
+
 ```sh
 cd web
-pnpm build:public                        # sanity check: must end with "verify-dist: OK (6 level(s)…)"
-vercel link                              # interactive; pick the personal scope.
-                                         # Answer NO to "Connect this Git repository…?".
+vercel link --scope kaktua               # interactive. Answer NO to "Connect this Git repository…?".
                                          # Do not use --yes: it auto-connects the Git remote.
-vercel pull --environment=preview        # project settings + Preview env into .vercel/
-vercel build                             # runs `pnpm build:public`, writes .vercel/output
-vercel deploy --prebuilt                 # uploads .vercel/output as a Preview deployment
 ```
+
+Preview:
+
+```sh
+pnpm build:public                        # sanity check: must end with "verify-dist: OK (6 level(s)…)"
+vercel pull --yes --environment=preview  # project settings + Preview env into .vercel/
+vercel build                             # runs `pnpm build:public`, writes .vercel/output
+vercel deploy --prebuilt --target=preview
+```
+
+Always pass `--target=preview`: the very first `vercel deploy --prebuilt` of this project landed
+on production. Confirm with `vercel inspect <deployment-id>` (`target preview`).
 
 Check the preview URL: the playlist shows 6 rounds, none labelled "(synthetic)", and
 `<url>/levels/1273a6914b4e.json` returns 200.
 
-Production (only after the preview is approved): repeat with the production target, because a
-prebuilt output is tied to the environment it was built for.
+Production: repeat with the production target, because a prebuilt output is tied to the
+environment it was built for.
 
 ```sh
-vercel pull --environment=production
+vercel pull --yes --environment=production   # required: brings in VITE_PUBLIC_URL
 vercel build --prod
 vercel deploy --prebuilt --prod
 ```
+
+Check that the live site serves the new bundle: the `assets/index-*.js` name in
+`curl -s https://relive-the-round.vercel.app/` matches `.vercel/output/static/assets/`.
 
 If `vercel project` / dashboard ever shows a connected Git repository, disconnect it
 (`vercel git disconnect`).
