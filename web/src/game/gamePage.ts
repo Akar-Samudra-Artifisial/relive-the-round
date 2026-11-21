@@ -1,16 +1,17 @@
 import { Application, Container, Graphics } from "pixi.js";
 import { mapFor } from "../maps";
 import { drawMap } from "../render/mapView";
-import { drawDown, drawEnemy, drawPlayer, drawSpike, drawTracer } from "../render/actors";
+import { drawFrame } from "../render/actors";
 import { DEFUSE_S, TICK_HZ } from "../sim/constants";
-import { segmentClear, type Vec2 } from "../sim/geom";
+import type { Vec2 } from "../sim/geom";
 import { ensureFonts, prefersReducedMotion } from "../ui/fonts";
 import { THEME_NUM } from "../ui/theme";
-import { clockAt, NO_INPUT, simTimeAt, type Input, type ShotEvent, type SimState } from "../sim/sim";
+import { clockAt, NO_INPUT, simTimeAt, type Input, type SimState } from "../sim/sim";
 import { buildWorld, type World } from "../sim/world";
 import { createAutopilot, type Autopilot } from "./autopilot";
 import { qrMatrix, renderCard, type QrMatrix } from "./cardImage";
 import { challengeLines, landingAction, replayKeyAction } from "./challengeLanding";
+import { liveFrame, TRACER_MS, type LiveTracer } from "./frameView";
 import { blocksDefault, clientToCanvas, mapInput, renderResolution, type Screen } from "./input";
 import { attractSlide, CornerTaps, isResetChord, kioskScoreDeadline, parseKiosk, RESET_CONFIRM_S } from "./kiosk";
 import { addEntry, clearEntries, normalizeInitials, topEntries, validInitials } from "./leaderboard";
@@ -32,7 +33,6 @@ import {
   shouldAbortPlay,
 } from "./timing";
 
-const TRACER_MS = 120;
 /** Matches the #gameStage / #replayBar spacing (--s-3) in theme.css. */
 const STAGE_PAD = 12;
 /** HUD turns the HP readout red at or below this value. */
@@ -44,8 +44,6 @@ function el<T extends HTMLElement>(id: string): T {
   if (!e) throw new Error(`game: missing #${id}`);
   return e as T;
 }
-
-type Tracer = { shot: ShotEvent; untilMs: number };
 
 /** Buttons and form fields handle Enter/Space/arrows natively; global shortcuts must not double up. */
 function isControl(t: EventTarget | null): boolean {
@@ -195,7 +193,7 @@ export async function startGame(): Promise<void> {
   let playStartedMs = 0;
   let current: LoadedLevel | null = null;
   let scale = 1;
-  let tracers: Tracer[] = [];
+  let tracers: LiveTracer[] = [];
   let scoreDeadline = 0;
   /** Kiosk score timer: when the score screen (re)appeared, when initials were saved, last input. */
   let scoreShownMs = 0;
@@ -847,29 +845,10 @@ export async function startGame(): Promise<void> {
   }
 }
 
-function drawDynamic(g: Graphics, world: World, s: SimState, aim: Vec2 | null, tracers: readonly Tracer[], nowMs: number): void {
+function drawDynamic(g: Graphics, world: World, s: SimState, aim: Vec2 | null, tracers: readonly LiveTracer[], nowMs: number): void {
   g.clear();
-  const p = s.clutcher;
-  if (world.spike && clockAt(world, simTimeAt(world, s.tick)).spikeActive) {
-    const full = DEFUSE_S * TICK_HZ;
-    const enemyTicks = Math.max(0, ...s.enemies.filter((e) => e.alive).map((e) => e.defuseTicks));
-    drawSpike(g, world.spike, {
-      defuse: p.defuseTicks / full,
-      enemyDefuse: enemyTicks / full,
-      pulseT: prefersReducedMotion() ? null : nowMs / 1000,
-    });
-  }
-  for (const e of s.enemies) {
-    if (!e.alive) {
-      drawDown(g, e.x, e.y);
-      continue;
-    }
-    // Fog of war: only enemies in the clutcher's line of sight are drawn.
-    if (!segmentClear(world.map.walls, p, e)) continue;
-    drawEnemy(g, e);
-  }
-  drawPlayer(g, p, aim);
-  for (const { shot, untilMs } of tracers) drawTracer(g, shot, (untilMs - nowMs) / TRACER_MS + 0.3);
+  // Fog of war, defuse arcs and tracer fade are decided in liveFrame; this only draws.
+  drawFrame(g, liveFrame(world, s, aim, tracers, nowMs, { reducedMotion: prefersReducedMotion() }));
 }
 
 function updateHud(world: World, s: SimState): void {

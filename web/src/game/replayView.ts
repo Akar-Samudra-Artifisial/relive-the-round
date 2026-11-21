@@ -1,15 +1,13 @@
 import { Container, Graphics, Text, type Ticker } from "pixi.js";
-import { drawDown, drawEnemy, drawPlayer, drawPro, drawSpike, drawTracer, ENEMY_COLOR, PLAYER_COLOR } from "../render/actors";
+import { drawFrame, PLAYER_COLOR } from "../render/actors";
 import { drawMap } from "../render/mapView";
-import { DEFUSE_S, TICK_HZ } from "../sim/constants";
-import { clockAt, type SimState } from "../sim/sim";
+import type { SimState } from "../sim/sim";
 import type { World } from "../sim/world";
 import { DISPLAY_FONT, MONO_FONT } from "../ui/fonts";
 import { THEME_NUM } from "../ui/theme";
-import { PANEL_CHROME, PANEL_GAP, proFrameAt, replaySpan, tickAtTime, type ReplayLayout } from "./replayModel";
+import { proFrame, youFrame } from "./frameView";
+import { PANEL_CHROME, PANEL_GAP, replaySpan, type ReplayLayout } from "./replayModel";
 
-/** Shot tracers stay visible for this many ticks in the replay (≈ the live 120 ms). */
-const TRACER_TICKS = 4;
 /** Height of the per-panel header strip (px). */
 const HEADER_H = 32;
 
@@ -171,42 +169,14 @@ export class ReplayView {
     this.view.destroy({ children: true });
   }
 
-  private drawSpike(g: Graphics, defuseTicks: number): void {
-    const sp = this.world.spike;
-    if (!sp || !clockAt(this.world, this.t).spikeActive) return;
-    // Still (no pulse): the replay is scrubbed, a pulse tied to wall time would jitter.
-    drawSpike(g, sp, { defuse: defuseTicks / (DEFUSE_S * TICK_HZ), pulseT: null });
-  }
-
   private drawYou(): void {
-    const g = this.youDyn;
-    g.clear();
-    const tick = tickAtTime(this.world, this.t, this.timeline.length);
-    // Clamped: holds the final state once the player's round is over.
-    const s = this.timeline[tick]!;
-    const p = s.clutcher;
-    this.drawSpike(g, p.defuseTicks);
-    for (const e of s.enemies) {
-      // No fog of war in the replay: the viewer sees the whole fight.
-      if (!e.alive) drawDown(g, e.x, e.y);
-      else drawEnemy(g, e);
-    }
-    // The recorded round has no aim data per tick here: body only.
-    if (p.hp > 0) drawPlayer(g, p, null);
-    else drawDown(g, p.x, p.y, PLAYER_COLOR);
-    for (let k = Math.max(1, tick - TRACER_TICKS + 1); k <= tick; k++) {
-      const fade = 1 - (tick - k) / TRACER_TICKS;
-      for (const shot of this.timeline[k]!.shots) drawTracer(g, shot, fade);
-    }
+    // No fog of war in the replay: the viewer sees the whole fight.
+    this.youDyn.clear();
+    drawFrame(this.youDyn, youFrame(this.world, this.timeline, this.t));
   }
 
   private drawPro(): void {
-    const g = this.proDyn;
-    g.clear();
-    const f = proFrameAt(this.world, this.world.level, this.t);
-    this.drawSpike(g, 0);
-    for (const k of f.kills) drawDown(g, k.at.x, k.at.y, k.victim === "P0" ? PLAYER_COLOR : ENEMY_COLOR);
-    for (const e of f.enemies) drawEnemy(g, e);
-    if (f.clutcherAlive) drawPro(g, f.clutcher);
+    this.proDyn.clear();
+    drawFrame(this.proDyn, proFrame(this.world, this.t));
   }
 }
