@@ -37,4 +37,7 @@ STL_DATA_DIR=/path/to/grid-starter uv run relive-spike --maps haven lotus
 
 ## License
 
-Code: MIT (see `LICENSE`). GRID data and anything derived from it: see the data repo license.
+Code: MIT (see `LICENSE`). The MIT license covers the source code only. The GRID match data used
+by this project is NOT included and is licensed separately (Sky's The Limit 2026 hackathon data
+license); it must be obtained from the official data repository. Anything derived from it is
+subject to that license.
