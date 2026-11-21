@@ -1,7 +1,7 @@
 import { Application, Container, Graphics, Text } from "pixi.js";
 import { SYNTHETIC_1V3 } from "../level/fixtures/synthetic-1v3";
 import { loadLevel } from "../level/loader";
-import type { Level } from "../level/types";
+import type { Level, MapName } from "../level/types";
 import { mapFor } from "../maps";
 import { drawMap } from "../render/mapView";
 import type { DensityRaster } from "../calib/metrics";
@@ -20,9 +20,17 @@ function el<T extends HTMLElement>(id: string): T {
   return e as T;
 }
 
+const MAP_NAMES: readonly MapName[] = ["haven", "lotus"];
+
+/** `?level=<file>` loads a real level (its own map wins); otherwise `?map=<haven|lotus>` picks the map for the synthetic fixture. */
 async function pickLevel(): Promise<Level> {
-  const file = new URLSearchParams(location.search).get("level");
-  return file ? loadLevel(file) : SYNTHETIC_1V3;
+  const params = new URLSearchParams(location.search);
+  const file = params.get("level");
+  if (file) return loadLevel(file);
+  const map = params.get("map") ?? "haven";
+  if (!MAP_NAMES.includes(map as MapName)) throw new Error(`debug: unknown ?map=${map} (expected ${MAP_NAMES.join(" | ")})`);
+  // The fixture's uv tracks were drawn for haven; on another map they only demo the warp.
+  return map === SYNTHETIC_1V3.map ? SYNTHETIC_1V3 : { ...SYNTHETIC_1V3, id: `${SYNTHETIC_1V3.id}-${map}`, map: map as MapName };
 }
 
 function drawNav(world: World): Graphics {
@@ -56,10 +64,12 @@ function drawWarp(world: World): Container {
 }
 
 /** Dev-only: real-data position density, copied temporarily to public/calib/ (git-ignored). */
-async function loadDensity(): Promise<DensityRaster> {
-  const url = `${import.meta.env.BASE_URL}calib/haven-density.json`;
+async function loadDensity(map: MapName): Promise<DensityRaster> {
+  // The name goes into a URL path: only the known maps (`?level=` files carry their own map field).
+  if (!MAP_NAMES.includes(map)) throw new Error(`density: unknown map "${map}" (expected ${MAP_NAMES.join(" | ")})`);
+  const url = `${import.meta.env.BASE_URL}calib/${map}-density.json`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`density: ${url} → HTTP ${res.status} (copy data/calib/haven-density.json to web/public/calib/)`);
+  if (!res.ok) throw new Error(`density: ${url} → HTTP ${res.status} (copy data/calib/${map}-density.json to web/public/calib/)`);
   const raw: unknown = await res.json();
   const r = raw as Partial<DensityRaster> | null;
   if (!r || typeof r.size !== "number" || !Array.isArray(r.counts) || r.counts.length !== r.size) {
@@ -140,7 +150,7 @@ export async function startDebugPage(): Promise<void> {
       densityLayer.visible = showDensity.checked;
       if (!showDensity.checked || loaded) return;
       loaded = true;
-      loadDensity()
+      loadDensity(level.map)
         .then((d) => densityLayer.addChild(drawDensity(world, d)))
         .catch((e: unknown) => {
           loaded = false;

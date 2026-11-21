@@ -1,4 +1,5 @@
 import type { MapName } from "../level/types";
+import { CISTERN } from "./cistern";
 import { KILN } from "./kiln";
 import type { MapDef } from "./types";
 
@@ -8,6 +9,6 @@ export function mapFor(name: MapName): MapDef {
     case "haven":
       return KILN;
     case "lotus":
-      throw new Error("maps: original stand-in for 'lotus' not built yet");
+      return CISTERN;
   }
 }
