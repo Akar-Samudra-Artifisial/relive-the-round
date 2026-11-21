@@ -205,6 +205,27 @@ describe("frame view purity", () => {
     }
   });
 
+  it("camera math and renderer selection (except detectCaps) use no renderer libs or DOM", () => {
+    const sources = import.meta.glob(["../src/render/three3d/camMath.ts", "../src/render/select.ts"], {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    });
+    const files = Object.entries(sources);
+    expect(files).toHaveLength(2);
+    const forbidden = /Math\.random|\bwindow\b|\bdocument\b|pixi|from\s*["']three|import\s*\(?\s*["']three/;
+    for (const [file, raw] of files) {
+      let src = String(raw);
+      if (file.endsWith("select.ts")) {
+        expect(src).not.toMatch(/pixi|from\s*["']three|import\s*\(?\s*["']three/);
+        const caps = /export function detectCaps\(\)[\s\S]*?\n}/;
+        expect(src, "detectCaps block").toMatch(caps);
+        src = src.replace(caps, "");
+      }
+      expect(src, file).not.toMatch(forbidden);
+    }
+  });
+
   it("frame loop uses no renderer libs or DOM (only the default browser clock/raf deps)", () => {
     const src = import.meta.glob("../src/game/frameLoop.ts", { query: "?raw", import: "default", eager: true });
     const files = Object.values(src);

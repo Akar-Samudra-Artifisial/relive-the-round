@@ -1,6 +1,7 @@
 import { mapFor } from "../maps";
 import { createPixi2dRenderer } from "../render/pixi2d";
 import type { FrameView, GameRenderer } from "../render/renderer";
+import { detectCaps, pickRenderer } from "../render/select";
 import { DEFUSE_S, TICK_HZ } from "../sim/constants";
 import type { Vec2 } from "../sim/geom";
 import { ensureFonts, prefersReducedMotion } from "../ui/fonts";
@@ -146,6 +147,9 @@ export async function startGame(): Promise<void> {
   const showFps = auto || params.has("fps");
   const fixedSeed = params.get("seed");
   const kiosk = parseKiosk(location.search);
+  // Phase 3: the pick is computed but only logged; the Pixi 2D renderer is always used for now.
+  const rendererPick = pickRenderer(location.search, detectCaps());
+  if (rendererPick.kind === "3d") console.info("[renderer] 3D renderer is not implemented yet; using 2D");
 
   const loaded: LoadedLevel[] = await Promise.all(FEATURED.map(loadFeatured));
   const worlds = new Map<LoadedLevel, World>(loaded.map((l) => [l, buildWorld(mapFor(l.level.map), l.level)]));

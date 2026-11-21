@@ -188,3 +188,37 @@ Changed pixels in full-page screenshots (1,024,000 px):
 - `pnpm -C web preview` (strict CSP, no `unsafe-eval`): `/` and `/?auto` show no
   `securitypolicyviolation` events and no console errors.
 - `pnpm -C web build:public` prints `verify-dist: OK`.
+
+## Phase 3 — camera math
+
+Pure camera math and renderer selection. There is still no three.js scene, and the game still draws
+with Pixi 2D.
+
+- `web/src/render/three3d/camMath.ts` (no three, no DOM; not imported by the game yet):
+  - Convention: the ground is the plane Y = 0, and world (x, y) maps to 3D (X = x, Y = 0, Z = y),
+    1 unit = 1 cm. The camera sits on the +Z side of the map centre, raised and pitched down,
+    looking toward -Z. Screen-up = smaller world y and screen-right = larger world x, as in 2D.
+  - `CAMERA_FOV_DEG = 30` (vertical FOV, like `THREE.PerspectiveCamera`) and
+    `CAMERA_PITCH_DEG = 58` (angle below the horizon). No yaw or roll.
+  - `fitCamera(bounds, aspect, { fovDeg, pitchDeg, margin = 0.04 })`: the target is the bounds
+    centre on the ground. The distance is the smallest one at which all four ground corners
+    project inside NDC `[-1 + margin, 1 - margin]` on both axes. It is found with a doubling upper
+    bound and a fixed 64-step bisection, so the result is deterministic and always valid.
+    `near = distance / 100`, `far = distance * 4`.
+  - `project` returns NDC x/y (y up) plus the view-space depth in cm, or null behind the camera.
+    `groundPoint` casts the ray through an NDC point onto Y = 0 and returns null when the ray
+    never reaches the ground. `ndcFromClient` turns CSS px into NDC for a plain rect.
+  - At this pitch the horizon is at NDC y = tan 58° / tan 15° ≈ 5.97, far above the screen, so
+    every on-screen point maps to the ground.
+- `web/src/render/select.ts`: `pickRenderer(search, caps)` is pure, and `detectCaps()` probes
+  WebGL2 on a throwaway canvas. Rules, in order:
+  1. `2d=1` → 2d (`forced`).
+  2. `3d=1` or a bare `3d` → 3d (`requested`) when WebGL2 is available, otherwise 2d
+     (`no webgl2`).
+  3. Anything else, including `3d=0` → 2d (`default`). The default stays 2D until phase 8.
+- `gamePage.ts` calls `pickRenderer` once at startup. When the pick is `3d`, it logs
+  `[renderer] 3D renderer is not implemented yet; using 2D` and still creates the Pixi renderer.
+- Entry chunk after `pnpm -C web build:public`: 401,677 B raw / 123,126 B gzip, which is
+  +471 B / +184 B gzip over the same build without the selection hook. three is not in it.
+- Parity: `/?auto&seed=42` gives the same score card as phase 2 (500 points, 3.7 s / 6.0 s,
+  2 / 3 kills). `/?3d=1` plays in 2D with the log line once, and `/?2d=1` logs nothing.
