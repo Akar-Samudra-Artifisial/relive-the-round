@@ -190,14 +190,46 @@ describe("proFrame", () => {
 });
 
 describe("frame view purity", () => {
-  it("frame builders and renderer types use no renderer libs, DOM or clocks", () => {
-    const sources = import.meta.glob(["../src/game/frameView.ts", "../src/render/renderer.ts"], { query: "?raw", import: "default", eager: true });
+  it("frame builders, the replay player and renderer types use no renderer libs, DOM or clocks", () => {
+    const sources = import.meta.glob(["../src/game/frameView.ts", "../src/game/replayPlayer.ts", "../src/render/renderer.ts"], {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    });
     const files = Object.entries(sources);
-    expect(files).toHaveLength(2);
+    expect(files).toHaveLength(3);
     for (const [file, src] of files) {
       expect(String(src), file).not.toMatch(
         /Math\.random|\bDate\b|performance\.now|\bwindow\b|\bdocument\b|pixi|from\s*["']three|import\s*\(?\s*["']three/,
       );
     }
+  });
+
+  it("frame loop uses no renderer libs or DOM (only the default browser clock/raf deps)", () => {
+    const src = import.meta.glob("../src/game/frameLoop.ts", { query: "?raw", import: "default", eager: true });
+    const files = Object.values(src);
+    expect(files).toHaveLength(1);
+    expect(String(files[0])).not.toMatch(/pixi|three|\bdocument\b|\bwindow\b/);
+  });
+});
+
+describe("renderer seam", () => {
+  const sources = import.meta.glob("../src/**/*.ts", { query: "?raw", import: "default", eager: true });
+  const pixiAllowed = (file: string): boolean =>
+    ["../src/render/pixi2d.ts", "../src/render/mapView.ts", "../src/render/actors.ts", "../src/main.ts"].includes(file) || file.startsWith("../src/debug/");
+
+  it("only the Pixi renderer files (and main.ts for unsafe-eval, plus the dev debug page) import pixi.js", () => {
+    const users = Object.entries(sources)
+      .filter(([, src]) => /["']pixi\.js/.test(String(src)))
+      .map(([file]) => file);
+    expect(users).toContain("../src/render/pixi2d.ts");
+    expect(users.filter((f) => !pixiAllowed(f))).toEqual([]);
+  });
+
+  it("the game page is Pixi-free and the old replay view is gone", () => {
+    expect(sources["../src/game/gamePage.ts"]).toBeDefined();
+    // It may use the renderer factory (`render/pixi2d`), never the library itself.
+    expect(String(sources["../src/game/gamePage.ts"])).not.toMatch(/["']pixi\.js/);
+    expect(sources["../src/game/replayView.ts"]).toBeUndefined();
   });
 });
