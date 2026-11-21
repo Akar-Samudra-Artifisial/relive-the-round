@@ -7,7 +7,7 @@ export type Featured = { readonly map: MapName; readonly file: string; readonly 
 
 /** Upper bound of the public playlist (also enforced by scripts/prepare-public.mjs). */
 export const MAX_FEATURED = 6;
-const MAPS: readonly MapName[] = ["haven", "lotus"];
+const MAPS: readonly MapName[] = ["kiln", "cistern"];
 
 /** Validate featured.json: ≤ MAX_FEATURED entries, `file` = `<id>.json` with a plain hex id, unique ids. */
 export function parseFeatured(raw: unknown): Featured[] {
@@ -27,8 +27,8 @@ export function parseFeatured(raw: unknown): Featured[] {
 }
 
 /**
- * Event playlist (src/game/featured.json, shared with scripts/prepare-public.mjs): haven clutches
- * on Kiln, lotus clutches on Cistern. Files are served from public/levels/ (git-ignored, copied
+ * Event playlist (src/game/featured.json, shared with scripts/prepare-public.mjs) on Kiln and
+ * Cistern. Files are served from public/levels/ (git-ignored, copied
  * from data/levels/<map>/); the synthetic fixture stands in when absent, except in public builds.
  */
 export const FEATURED: readonly Featured[] = parseFeatured(featuredJson);
@@ -71,7 +71,7 @@ export async function loadFeatured(f: Featured): Promise<LoadedLevel> {
   } catch (err) {
     if (levelsRequired()) throw err;
     // Missing real data (fresh clone / no ETL run): keep the kiosk playable with the fixture.
-    // Re-tagged per slot: the right map (lotus → Cistern) and a unique id so scores don't collide.
+    // Re-tagged per slot: the right map (e.g. Cistern) and a unique id so scores don't collide.
     const level: Level = { ...SYNTHETIC_1V3, id: `synthetic-${f.id.slice(0, 20)}`, map: f.map };
     return { featured: f, level, synthetic: true, blurb: blurbFor(level) };
   }

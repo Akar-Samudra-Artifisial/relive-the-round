@@ -1,8 +1,9 @@
 """Calibration anchors for warping a source map's uv onto the original "Kiln" map.
 
 Usage: STL_DATA_DIR=... uv run relive-calib-anchors --map haven
-Writes data/calib/<map>-anchors.json and data/calib/<map>-density.json (git-ignored: derived from
-GRID data). Both files hold aggregates only (no player/team/series/game ids).
+Writes data/calib/<map>-anchors.json and data/calib/<public map id>-density.json (e.g.
+kiln-density.json, read by the web debug page; both git-ignored: derived from GRID data). Both
+files hold aggregates only (no player/team/series/game ids).
 
 Anchors:
 - callouts: valorant-api callout label positions (cached by `geometry.fetch_api_maps`) -> uv;
@@ -26,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from .clutch import RoundData
-from .config import PROJECT_ROOT, data_dir
+from .config import PROJECT_ROOT, PUBLIC_MAP_IDS, data_dir
 from .geometry import (
     MapCalib,
     fetch_api_maps,
@@ -350,7 +351,7 @@ def render_doc(anchors: dict[str, Any], target: str = "Kiln") -> str:
             f"- Hotspots: busiest cells of a {HOT_GRID}x{HOT_GRID} grid over all in-round "
             "position samples (cells >= 2 apart), mean uv per cell.",
             f"- Density raster: {RASTER_SIZE}x{RASTER_SIZE} counts of the same samples "
-            "(`<map>-density.json`) for the debug overlay; extent = p1/p99 per axis.",
+            "(`<public map id>-density.json`) for the debug overlay; extent = p1/p99 per axis.",
             "",
             "## Result",
             "",
@@ -419,7 +420,7 @@ def main(argv: list[str] | None = None) -> None:
     (a.out_dir / f"{a.map}-anchors.json").write_text(
         json.dumps(anchors, indent=1), encoding="utf-8"
     )
-    (a.out_dir / f"{a.map}-density.json").write_text(
+    (a.out_dir / f"{PUBLIC_MAP_IDS[a.map]}-density.json").write_text(
         json.dumps(density), encoding="utf-8"
     )
     doc = a.doc or PROJECT_ROOT / "docs" / f"calibration-{a.map}.md"

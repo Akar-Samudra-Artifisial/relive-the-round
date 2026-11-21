@@ -5,10 +5,10 @@ import { FEATURED, MAX_FEATURED, loadFeatured, parseFeatured } from "../src/game
 const CISTERN_PICKS = ["1273a6914b4e", "90163e309394", "edc320bb8210"];
 
 describe("featured.json", () => {
-  it("lists 3 haven + 3 lotus levels within the public cap", () => {
+  it("lists 3 Kiln + 3 Cistern levels within the public cap", () => {
     expect(FEATURED.length).toBeLessThanOrEqual(MAX_FEATURED);
-    expect(FEATURED.filter((f) => f.map === "haven")).toHaveLength(3);
-    expect(FEATURED.filter((f) => f.map === "lotus").map((f) => f.id)).toEqual(CISTERN_PICKS);
+    expect(FEATURED.filter((f) => f.map === "kiln")).toHaveLength(3);
+    expect(FEATURED.filter((f) => f.map === "cistern").map((f) => f.id)).toEqual(CISTERN_PICKS);
   });
 
   it("rejects malformed playlists", () => {
@@ -33,7 +33,7 @@ describe("loadFeatured", () => {
     expect(l.synthetic).toBe(true);
   });
 
-  it("re-tags the fixture per slot: lotus slots play on Cistern, ids stay unique", async () => {
+  it("re-tags the fixture per slot: cistern slots play on Cistern, ids stay unique", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 404 })));
     const all = await Promise.all(FEATURED.map(loadFeatured));
     for (const l of all) {

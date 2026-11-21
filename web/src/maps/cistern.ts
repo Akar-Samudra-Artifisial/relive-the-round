@@ -10,7 +10,6 @@ import type { MapDef } from "./types";
 export const CISTERN: MapDef = {
   id: "cistern",
   name: "Cistern",
-  sourceMap: "lotus",
   width: 8000,
   height: 8000,
   walls: [
@@ -48,7 +47,7 @@ export const CISTERN: MapDef = {
     attack: rect(2800, 6700, 5600, 7600),
     defense: rect(2600, 300, 5000, 1100),
   },
-  // Calibrated against aggregated real-match data (data/calib/lotus-anchors.json, not committed):
+  // Calibrated against aggregated real-match data (data/calib/ anchors, not committed):
   // `src` = median plant point per site and named-area anchors. The source minimap is mirrored
   // left↔right relative to Cistern (source u → Cistern -x), so the warp is a reflection. `dst` starts
   // from one affine fit of the occupied uv extent; the walls were then placed so the real position

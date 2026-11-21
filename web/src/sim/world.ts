@@ -19,8 +19,8 @@ export type World = {
 };
 
 export function buildWorld(map: MapDef, level: Level): World {
-  if (map.sourceMap !== level.map) {
-    throw new Error(`world: map ${map.id} stands in for ${map.sourceMap}, level ${level.id} uses ${level.map}`);
+  if (map.id !== level.map) {
+    throw new Error(`world: map ${map.id} does not match level ${level.id} (map ${level.map})`);
   }
   const nav = buildNavGrid(map, NAV_CELL, NAV_CLEARANCE);
   const warp = buildWarp(map.landmarks);

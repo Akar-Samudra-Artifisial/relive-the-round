@@ -9,7 +9,8 @@ import { createAutopilot, type Autopilot } from "./autopilot";
 import { qrMatrix, renderCard, type QrMatrix } from "./cardImage";
 import { challengeLines, landingAction, replayKeyAction } from "./challengeLanding";
 import { blocksDefault, mapInput, type Screen } from "./input";
-import { addEntry, normalizeInitials, topEntries, validInitials } from "./leaderboard";
+import { attractSlide, CornerTaps, isResetChord, kioskScoreDeadline, parseKiosk, RESET_CONFIRM_S } from "./kiosk";
+import { addEntry, clearEntries, normalizeInitials, topEntries, validInitials } from "./leaderboard";
 import { FEATURED, loadFeatured, type LoadedLevel } from "./levels";
 import { buildYouTimeline } from "./replayModel";
 import { ReplayView, type ReplaySpeed } from "./replayView";
@@ -116,6 +117,7 @@ export async function startGame(): Promise<void> {
   const auto = params.has("auto");
   const showFps = auto || params.has("fps");
   const fixedSeed = params.get("seed");
+  const kiosk = parseKiosk(location.search);
 
   const loaded: LoadedLevel[] = await Promise.all(FEATURED.map(loadFeatured));
   const worlds = new Map<LoadedLevel, World>(loaded.map((l) => [l, buildWorld(mapFor(l.level.map), l.level)]));
@@ -137,6 +139,7 @@ export async function startGame(): Promise<void> {
   const dyn = new Graphics();
 
   const attract = el<HTMLDivElement>("attract");
+  const idleEl = el<HTMLDivElement>("idle");
   const scoreScreen = el<HTMLDivElement>("scoreScreen");
   const hud = el<HTMLDivElement>("hud");
   const fpsEl = el<HTMLDivElement>("fps");
@@ -152,6 +155,12 @@ export async function startGame(): Promise<void> {
   let scale = 1;
   let tracers: Tracer[] = [];
   let scoreDeadline = 0;
+  /** Kiosk score timer: when the score screen (re)appeared, when initials were saved, last input. */
+  let scoreShownMs = 0;
+  let savedAtMs: number | null = null;
+  let lastActivityMs = performance.now();
+  /** Kiosk operator reset panel is open (pauses the attract loop). */
+  let resetOpen = false;
   let card: ScoreCard | null = null;
   let saved = false;
   /** Session of the round shown on the score screen (seed + recording feed the replay). */
@@ -175,15 +184,17 @@ export async function startGame(): Promise<void> {
   const show = (next: Screen): void => {
     screen = next;
     attract.hidden = next !== "attract";
+    idleEl.hidden = next !== "idle";
     scoreScreen.hidden = next !== "score";
     hud.hidden = next !== "play";
     countdownEl.hidden = next !== "play";
     replayBar.hidden = next !== "replay";
     root.visible = next !== "replay";
-    app.canvas.style.visibility = next === "attract" ? "hidden" : "visible";
+    app.canvas.style.visibility = next === "attract" || next === "idle" ? "hidden" : "visible";
   };
 
-  const renderBoard = (): void => {
+  /** Top-5 rows for the level select and the kiosk attract loop (fresh nodes per call). */
+  const boardRows = (): HTMLLIElement[] => {
     const rows = topEntries()
       .slice(0, 5)
       .map((e, i) => {
@@ -202,7 +213,28 @@ export async function startGame(): Promise<void> {
       li.textContent = "No scores yet — be the first.";
       rows.push(li);
     }
-    el<HTMLOListElement>("board").replaceChildren(...rows);
+    return rows;
+  };
+  const renderBoard = (): void => el<HTMLOListElement>("board").replaceChildren(...boardRows());
+
+  let idleSlide = -1;
+  const renderIdleSlide = (): void => {
+    const i = attractSlide(performance.now(), loaded.length);
+    if (i === idleSlide) return;
+    idleSlide = i;
+    const l = loaded[i];
+    el<HTMLElement>("idleSlideTitle").textContent = l ? `${i + 1}. ${l.featured.title}` : "";
+    el<HTMLElement>("idleSlideBlurb").textContent = l?.blurb ?? "";
+  };
+
+  /** Kiosk only: the attract loop over an untouched level select. */
+  const toIdle = (): void => {
+    // A focused button would otherwise activate on the dismissing key.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    el<HTMLOListElement>("idleBoard").replaceChildren(...boardRows());
+    idleSlide = -1;
+    renderIdleSlide();
+    show("idle");
   };
 
   const renderChallenge = (): void => {
@@ -274,6 +306,8 @@ export async function startGame(): Promise<void> {
     card = null;
     finished = null;
     roundChallenge = null;
+    // The idle countdown starts fresh each time the level select appears.
+    if (kiosk.enabled) lastActivityMs = performance.now();
     renderBoard();
     renderChallenge();
     show("attract");
@@ -285,6 +319,8 @@ export async function startGame(): Promise<void> {
     finished = sess;
     saved = false;
     scoreDeadline = performance.now() + SCORE_RETURN_S * 1000;
+    scoreShownMs = performance.now();
+    savedAtMs = null;
     el<HTMLHeadingElement>("resultTitle").textContent = card.won ? "Clutched!" : "Not this time";
     el<HTMLParagraphElement>("resultReason").textContent = REASON_TEXT[card.reason];
     const rows: [string, string, string][] = [
@@ -335,6 +371,7 @@ export async function startGame(): Promise<void> {
   const backToScore = (): void => {
     closeReplay();
     scoreDeadline = performance.now() + SCORE_RETURN_S * 1000;
+    scoreShownMs = performance.now();
     show("score");
     if (!auto) el<HTMLButtonElement>("watchReplay").focus();
   };
@@ -387,7 +424,7 @@ export async function startGame(): Promise<void> {
   };
 
   const downloadCard = async (): Promise<void> => {
-    if (!card || !current || !shareQr) return;
+    if (kiosk.enabled || !card || !current || !shareQr) return;
     const btn = el<HTMLButtonElement>("downloadCard");
     const result = { levelTitle: current.featured.title, card, url: shareUrl };
     btn.disabled = true;
@@ -442,6 +479,7 @@ export async function startGame(): Promise<void> {
       return false;
     }
     saved = true;
+    savedAtMs = performance.now();
     el<HTMLButtonElement>("saveScore").disabled = true;
     initialsMsg.textContent = addEntry({ initials, points: card.points, levelId: current.level.id })
       ? `Saved as ${initials}.`
@@ -463,9 +501,143 @@ export async function startGame(): Promise<void> {
   replaySlider.addEventListener("input", () => replay?.setTime(Number(replaySlider.value)));
   el<HTMLButtonElement>("replayExit").addEventListener("click", backToScore);
   addEventListener("hashchange", () => {
+    // A booth machine never opens challenge links.
+    if (kiosk.enabled) return;
     readHash();
     if (screen === "attract") toAttract();
   });
+
+  if (kiosk.enabled) {
+    // Visitors scan the QR on their phone; nothing gets downloaded onto the booth machine.
+    el<HTMLButtonElement>("downloadCard").hidden = true;
+    const touch = (): void => {
+      lastActivityMs = performance.now();
+    };
+    let lastMove: { x: number; y: number } | null = null;
+    addEventListener("keydown", touch, { capture: true });
+    addEventListener("pointerdown", touch, { capture: true });
+    addEventListener("wheel", touch, { capture: true, passive: true });
+    addEventListener(
+      "pointermove",
+      (e) => {
+        // A jittery mouse must not keep the booth awake forever.
+        if (lastMove && Math.hypot(e.clientX - lastMove.x, e.clientY - lastMove.y) < 4) return;
+        lastMove = { x: e.clientX, y: e.clientY };
+        touch();
+      },
+      { capture: true, passive: true },
+    );
+
+    // Hidden operator reset (level select / attract loop only): Ctrl+Shift+Alt+R or 5 quick taps
+    // in the top-left corner open an in-page confirm (kiosk browsers often block window.confirm).
+    const resetPanel = el<HTMLDivElement>("kioskReset");
+    const resetMsg = el<HTMLParagraphElement>("kioskResetMsg");
+    const resetClear = el<HTMLButtonElement>("kioskResetClear");
+    const corner = new CornerTaps();
+    let resetTimer: ReturnType<typeof setTimeout> | undefined;
+    const closeReset = (): void => {
+      clearTimeout(resetTimer);
+      resetPanel.hidden = true;
+      resetOpen = false;
+      lastActivityMs = performance.now();
+    };
+    const openReset = (): void => {
+      if (screen === "idle") toAttract();
+      resetOpen = true;
+      resetMsg.textContent = "";
+      resetClear.disabled = false;
+      resetPanel.hidden = false;
+      resetClear.focus();
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(closeReset, RESET_CONFIRM_S * 1000);
+    };
+    resetClear.addEventListener("click", () => {
+      const ok = clearEntries();
+      renderBoard();
+      resetClear.disabled = true;
+      resetMsg.textContent = ok ? "Scores cleared." : "Could not clear scores (storage unavailable).";
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(closeReset, 2000);
+    });
+    el<HTMLButtonElement>("kioskResetCancel").addEventListener("click", closeReset);
+    const onMenu = (): boolean => screen === "attract" || screen === "idle";
+
+    // The first input on the attract loop only dismisses it: nothing passes through, so it can
+    // never start a level (also not via a held key or the click that follows the pointerdown).
+    let swallowKey: string | null = null;
+    let swallowClick = false;
+    const dismissIdle = (e: Event): boolean => {
+      if (screen !== "idle") return false;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      toAttract();
+      return true;
+    };
+    addEventListener(
+      "keydown",
+      (e) => {
+        if (resetOpen) {
+          // Buttons keep their native Enter/Space; level shortcuts must not fire behind the panel.
+          e.stopImmediatePropagation();
+          if (e.key === "Escape") {
+            e.preventDefault();
+            closeReset();
+          }
+          return;
+        }
+        if (onMenu() && isResetChord(e)) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          openReset();
+          return;
+        }
+        if (swallowKey !== null && e.repeat && e.code === swallowKey) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
+        if (dismissIdle(e)) swallowKey = e.code;
+      },
+      { capture: true },
+    );
+    addEventListener("keyup", (e) => {
+      if (e.code === swallowKey) swallowKey = null;
+    });
+    addEventListener(
+      "pointerdown",
+      (e) => {
+        if (resetOpen) {
+          // Only the panel is live; nothing behind it may start a round.
+          if (!(e.target instanceof Node && resetPanel.contains(e.target))) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            swallowClick = true;
+          }
+          return;
+        }
+        if (onMenu() && corner.tap(e.clientX, e.clientY, performance.now())) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          swallowClick = true;
+          openReset();
+          return;
+        }
+        if (dismissIdle(e)) swallowClick = true;
+      },
+      { capture: true },
+    );
+    addEventListener(
+      "click",
+      (e) => {
+        if (!swallowClick) return;
+        swallowClick = false;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      },
+      { capture: true },
+    );
+    addEventListener("pointerup", () => setTimeout(() => (swallowClick = false), 0));
+  }
 
   addEventListener("keydown", (e) => {
     // A held Enter/Space must not chain screens (e.g. save → attract → random level).
@@ -519,8 +691,17 @@ export async function startGame(): Promise<void> {
       else if (replayEnded) backToScore();
       return;
     }
+    if (kiosk.enabled && screen === "attract" && !resetOpen && performance.now() - lastActivityMs > kiosk.attractIdleS * 1000) {
+      toIdle();
+      return;
+    }
+    if (screen === "idle") {
+      renderIdleSlide();
+      return;
+    }
     if (screen === "score") {
-      const left = Math.max(0, Math.ceil((scoreDeadline - performance.now()) / 1000));
+      const deadline = kiosk.enabled ? kioskScoreDeadline({ shownAtMs: scoreShownMs, savedAtMs, lastActivityMs }) : scoreDeadline;
+      const left = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
       el<HTMLSpanElement>("returnIn").textContent = String(left);
       if (left === 0) toAttract();
       return;
@@ -562,11 +743,12 @@ export async function startGame(): Promise<void> {
         replay: () => (replay ? { t: replay.time, startT: replay.startT, endT: replay.endT, playing: replay.isPlaying } : null),
         shareUrl: () => shareUrl,
         challenge: () => pending?.challenge ?? null,
+        kiosk: () => ({ ...kiosk, lastActivityMs, savedAtMs, idleSlide: screen === "idle" ? idleSlide : null }),
       },
     });
   }
 
-  readHash();
+  if (!kiosk.enabled) readHash();
   if (auto || params.has("level")) {
     const idx = Math.min(loaded.length - 1, Math.max(0, Number(params.get("level") ?? 0) || 0));
     startLevel(loaded[idx]!);

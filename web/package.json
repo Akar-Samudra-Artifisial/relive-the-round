@@ -9,6 +9,7 @@
     "build:public": "node scripts/prepare-public.mjs && VITE_REQUIRE_LEVELS=1 pnpm build && node scripts/verify-dist.mjs",
     "preview": "vite preview --port 4177 --strictPort",
     "lint": "tsc --noEmit",
+    "og-image": "node scripts/make-og-image.mjs",
     "test": "vitest run"
   },
   "dependencies": {

@@ -20,16 +20,16 @@ function el<T extends HTMLElement>(id: string): T {
   return e as T;
 }
 
-const MAP_NAMES: readonly MapName[] = ["haven", "lotus"];
+const MAP_NAMES: readonly MapName[] = ["kiln", "cistern"];
 
-/** `?level=<file>` loads a real level (its own map wins); otherwise `?map=<haven|lotus>` picks the map for the synthetic fixture. */
+/** `?level=<file>` loads a real level (its own map wins); otherwise `?map=<kiln|cistern>` picks the map for the synthetic fixture. */
 async function pickLevel(): Promise<Level> {
   const params = new URLSearchParams(location.search);
   const file = params.get("level");
   if (file) return loadLevel(file);
-  const map = params.get("map") ?? "haven";
+  const map = params.get("map") ?? "kiln";
   if (!MAP_NAMES.includes(map as MapName)) throw new Error(`debug: unknown ?map=${map} (expected ${MAP_NAMES.join(" | ")})`);
-  // The fixture's uv tracks were drawn for haven; on another map they only demo the warp.
+  // The fixture's uv tracks were drawn for Kiln; on another map they only demo the warp.
   return map === SYNTHETIC_1V3.map ? SYNTHETIC_1V3 : { ...SYNTHETIC_1V3, id: `${SYNTHETIC_1V3.id}-${map}`, map: map as MapName };
 }
 

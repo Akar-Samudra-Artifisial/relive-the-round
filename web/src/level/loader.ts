@@ -37,7 +37,7 @@ const ACTOR_IDS: readonly ActorId[] = ["P0", "E1", "E2", "E3", "E4", "E5"];
 
 function sample(v: unknown, path: string): Sample {
   const o = obj(v, path);
-  return { t: num(o.t, `${path}.t`), x: num(o.x, `${path}.x`), y: num(o.y, `${path}.y`), u: unit(o.u, `${path}.u`), v: unit(o.v, `${path}.v`) };
+  return { t: num(o.t, `${path}.t`), u: unit(o.u, `${path}.u`), v: unit(o.v, `${path}.v`) };
 }
 
 function actor(v: unknown, path: string, ids: readonly ActorId[]): Actor {
@@ -47,25 +47,26 @@ function actor(v: unknown, path: string, ids: readonly ActorId[]): Actor {
   const hp = num(o.hp, `${path}.hp`);
   if (hp <= 0) fail(`${path}.hp`, `must be > 0, got ${hp}`);
   const a: Actor = { id: oneOf(o.id, ids, `${path}.id`), hp, samples };
-  if (o.armor !== undefined) a.armor = num(o.armor, `${path}.armor`);
-  if (o.weapon !== undefined) a.weapon = String(o.weapon);
   if (o.diedT !== undefined) a.diedT = num(o.diedT, `${path}.diedT`);
   return a;
 }
 
-/** Validate untrusted level JSON against schema v1. Throws with the failing field path. */
+/**
+ * Validate untrusted level JSON against schema v2. Throws with the failing field path.
+ * Only the fields the game uses are copied; anything else in the input is dropped.
+ */
 export function parseLevel(raw: unknown): Level {
   const o = obj(raw, "root");
-  oneOf(o.schemaVersion, [1] as const, "schemaVersion");
+  oneOf(o.schemaVersion, [2] as const, "schemaVersion");
   if (typeof o.id !== "string" || o.id === "") fail("id", "must be a non-empty string");
   const spikeO = obj(o.spike, "spike");
   const outcomeO = obj(o.outcome, "outcome");
   const enemies = arr(o.enemies, "enemies").map((e, i) => actor(e, `enemies[${i}]`, ["E1", "E2", "E3", "E4", "E5"]));
   const clutchSize = oneOf(o.clutchSize, [2, 3, 4, 5] as const, "clutchSize");
   const level: Level = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: o.id,
-    map: oneOf(o.map, ["haven", "lotus"] as const, "map"),
+    map: oneOf(o.map, ["kiln", "cistern"] as const, "map"),
     clutchSize,
     clutcherSide: oneOf(o.clutcherSide, ["attack", "defense"] as const, "clutcherSide"),
     clutcherWon: oneOf(o.clutcherWon, [true, false] as const, "clutcherWon"),
@@ -77,15 +78,12 @@ export function parseLevel(raw: unknown): Level {
     enemies,
     kills: arr(o.kills, "kills").map((k, i) => {
       const ko = obj(k, `kills[${i}]`);
-      const kill: Level["kills"][number] = {
+      return {
         t: num(ko.t, `kills[${i}].t`),
         killer: oneOf(ko.killer, ACTOR_IDS, `kills[${i}].killer`),
         victim: oneOf(ko.victim, ACTOR_IDS, `kills[${i}].victim`),
-        killerUV: uv(ko.killerUV, `kills[${i}].killerUV`),
         victimUV: uv(ko.victimUV, `kills[${i}].victimUV`),
       };
-      if (ko.weapon !== undefined) kill.weapon = String(ko.weapon);
-      return kill;
     }),
     outcome: {
       winner: oneOf(outcomeO.winner, ["clutcher", "enemies"] as const, "outcome.winner"),

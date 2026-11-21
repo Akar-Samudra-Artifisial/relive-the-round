@@ -13,8 +13,6 @@ export type Landmark = {
 export type MapDef = {
   readonly id: string;
   readonly name: string;
-  /** Level `map` value this original map stands in for. */
-  readonly sourceMap: "haven" | "lotus";
   readonly width: number;
   readonly height: number;
   /** Solid geometry: everything inside any polygon is not walkable. */

@@ -57,6 +57,17 @@ export function topEntries(levelId?: string, store: KeyValueStore | null = defau
     .slice(0, MAX_PER_LEVEL);
 }
 
+/** Removes every entry (operator reset). Returns false when storage is unavailable or the write fails. */
+export function clearEntries(store: KeyValueStore | null = defaultStore()): boolean {
+  if (!store) return false;
+  try {
+    store.setItem(KEY, "[]");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Adds an entry; keeps the best MAX_PER_LEVEL per level. Returns false when not saved (bad initials or storage failure). */
 export function addEntry(entry: Entry, store: KeyValueStore | null = defaultStore()): boolean {
   if (!store || !validInitials(entry.initials) || !Number.isFinite(entry.points)) return false;

@@ -1,18 +1,16 @@
 import type { Actor, Level, Sample } from "../types";
 
 // Synthetic level for dev/tests only (hand-made, not derived from any match data).
-// x/y are fake source-world coords; u/v drive the warp (same orientation as real haven data:
+// u/v drive the warp (same orientation as real Kiln level data:
 // u grows defender → attacker side, v grows from the A side to the C side).
 
 function track(points: readonly (readonly [number, number, number])[]): Sample[] {
-  return points.map(([t, u, v]) => ({ t, x: Math.round(u * 10000), y: Math.round(v * 10000), u, v }));
+  return points.map(([t, u, v]) => ({ t, u, v }));
 }
 
 const clutcher: Actor = {
   id: "P0",
   hp: 100,
-  armor: 50,
-  weapon: "rifle",
   samples: track([
     [0, 0.839, 0.561],
     [3, 0.561, 0.435],
@@ -29,8 +27,6 @@ const enemies: Actor[] = [
   {
     id: "E1",
     hp: 100,
-    armor: 50,
-    weapon: "rifle",
     samples: track([
       [0, 0.3, 0.23],
       [4, 0.408, 0.193],
@@ -42,7 +38,6 @@ const enemies: Actor[] = [
   {
     id: "E2",
     hp: 100,
-    weapon: "smg",
     samples: track([
       [0, 0.376, 0.512],
       [5, 0.284, 0.526],
@@ -55,8 +50,6 @@ const enemies: Actor[] = [
   {
     id: "E3",
     hp: 100,
-    armor: 25,
-    weapon: "rifle",
     samples: track([
       [0, 0.47, 0.791],
       [2, 0.502, 0.9],
@@ -71,9 +64,9 @@ const enemies: Actor[] = [
 ];
 
 export const SYNTHETIC_1V3: Level = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: "synthetic-1v3",
-  map: "haven",
+  map: "kiln",
   clutchSize: 3,
   clutcherSide: "attack",
   clutcherWon: true,
@@ -84,9 +77,9 @@ export const SYNTHETIC_1V3: Level = {
   clutcher,
   enemies,
   kills: [
-    { t: 14, killer: "P0", victim: "E1", weapon: "rifle", killerUV: [0.467, 0.191], victimUV: [0.402, 0.25] },
-    { t: 20, killer: "P0", victim: "E2", weapon: "rifle", killerUV: [0.399, 0.251], victimUV: [0.386, 0.287] },
-    { t: 28, killer: "P0", victim: "E3", weapon: "rifle", killerUV: [0.419, 0.158], victimUV: [0.431, 0.192] },
+    { t: 14, killer: "P0", victim: "E1", victimUV: [0.402, 0.25] },
+    { t: 20, killer: "P0", victim: "E2", victimUV: [0.386, 0.287] },
+    { t: 28, killer: "P0", victim: "E3", victimUV: [0.431, 0.192] },
   ],
   outcome: { winner: "clutcher", t: 28, reason: "elimination" },
 };

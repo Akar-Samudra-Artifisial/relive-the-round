@@ -28,17 +28,17 @@ const allLevels = Object.values(levelFiles).map(parseLevel);
 
 // minDensityWalkable: share of the real position-density raster that must warp onto floor.
 // Kiln sits at 87.9% (kiln.ts is frozen with the golden sim hash), Cistern at 98.7%.
-const MAPS: readonly { readonly source: MapName; readonly map: MapDef; readonly minDensityWalkable: number }[] = [
-  { source: "haven", map: KILN, minDensityWalkable: 0.85 },
-  { source: "lotus", map: CISTERN, minDensityWalkable: 0.95 },
+const MAPS: readonly { readonly id: MapName; readonly map: MapDef; readonly minDensityWalkable: number }[] = [
+  { id: "kiln", map: KILN, minDensityWalkable: 0.85 },
+  { id: "cistern", map: CISTERN, minDensityWalkable: 0.95 },
 ];
 
-for (const { source, map, minDensityWalkable } of MAPS) {
-  const levels = allLevels.filter((l) => l.map === source);
-  const density = Object.entries(densityFiles).find(([path]) => path.endsWith(`/${source}-density.json`))?.[1];
+for (const { id, map, minDensityWalkable } of MAPS) {
+  const levels = allLevels.filter((l) => l.map === id);
+  const density = Object.entries(densityFiles).find(([path]) => path.endsWith(`/${id}-density.json`))?.[1];
   const noLevels = levels.length === 0;
 
-  describe.skipIf(noLevels)(`${map.name} calibration vs real ${source} levels${noLevels ? " [SKIPPED: needs data/levels/]" : ""}`, () => {
+  describe.skipIf(noLevels)(`${map.name} calibration vs real ${id} levels${noLevels ? " [SKIPPED: needs data/levels/]" : ""}`, () => {
     it.skipIf(!density)(`density raster lands on floor (≥${minDensityWalkable * 100}%)${density ? "" : " [SKIPPED: needs data/calib/]"}`, () => {
       const m = calibMetrics(map, levels, density);
       expect(m.densityWalkableShare).not.toBeNull();
@@ -104,8 +104,8 @@ describe("Cistern landmarks (data-independent)", () => {
     }
   });
 
-  it("builds a world for the synthetic fixture re-tagged as lotus (debug page ?map=lotus)", () => {
-    const w = buildWorld(mapFor("lotus"), { ...SYNTHETIC_1V3, map: "lotus" });
+  it("builds a world for the synthetic fixture re-tagged as cistern (debug page ?map=cistern)", () => {
+    const w = buildWorld(mapFor("cistern"), { ...SYNTHETIC_1V3, map: "cistern" });
     expect(w.map.id).toBe("cistern");
     expect(w.clutcherRail.keys.every((k) => isWalkable(nav, k))).toBe(true);
   });

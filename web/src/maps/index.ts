@@ -3,12 +3,12 @@ import { CISTERN } from "./cistern";
 import { KILN } from "./kiln";
 import type { MapDef } from "./types";
 
-/** Original map that stands in for each level `map` value. */
+/** Original map for each level `map` id. */
 export function mapFor(name: MapName): MapDef {
   switch (name) {
-    case "haven":
+    case "kiln":
       return KILN;
-    case "lotus":
+    case "cistern":
       return CISTERN;
   }
 }

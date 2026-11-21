@@ -9,7 +9,6 @@ import type { MapDef } from "./types";
 export const KILN: MapDef = {
   id: "kiln",
   name: "Kiln",
-  sourceMap: "haven",
   width: 8000,
   height: 8000,
   walls: [
@@ -57,7 +56,7 @@ export const KILN: MapDef = {
     attack: rect(1200, 6800, 6800, 7700),
     defense: rect(600, 300, 7400, 1150),
   },
-  // Calibrated against aggregated real-match data (data/calib/haven-anchors.json, not committed):
+  // Calibrated against aggregated real-match data (data/calib/ anchors, not committed):
   // `src` = median plant point per site, spawn and named-area anchors, and positional hotspots.
   // The source minimap is transposed relative to Kiln (source u → Kiln y, source v → Kiln x), so
   // the warp is a reflection. `dst` was tuned (each landmark constrained to its matching Kiln area,

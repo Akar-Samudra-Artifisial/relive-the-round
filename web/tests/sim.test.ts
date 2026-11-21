@@ -224,7 +224,24 @@ describe("level loader", () => {
     expect(parseLevel(JSON.parse(JSON.stringify(SYNTHETIC_1V3)))).toEqual(SYNTHETIC_1V3);
   });
 
-  it("rejects bad schemaVersion with the field path", () => {
-    expect(() => parseLevel({ ...SYNTHETIC_1V3, schemaVersion: 2 })).toThrow(/schemaVersion/);
+  it("rejects bad schemaVersion with the field path (v1 files need relive-migrate-levels)", () => {
+    expect(() => parseLevel({ ...SYNTHETIC_1V3, schemaVersion: 1 })).toThrow(/schemaVersion/);
+  });
+
+  it("rejects source map names: only original map ids are valid", () => {
+    expect(() => parseLevel({ ...SYNTHETIC_1V3, map: "haven" })).toThrow(/map must be one of kiln\|cistern/);
+    expect(parseLevel({ ...SYNTHETIC_1V3, map: "cistern" }).map).toBe("cistern");
+  });
+
+  it("drops fields the client does not use (weapons, armor, raw x/y, killer position)", () => {
+    const raw = JSON.parse(JSON.stringify(SYNTHETIC_1V3));
+    raw.clutcher.weapon = "rifle";
+    raw.clutcher.armor = 50;
+    raw.clutcher.samples[0].x = 123;
+    raw.kills[0].weapon = "rifle";
+    raw.kills[0].killerUV = [0.1, 0.1];
+    const level = parseLevel(raw);
+    expect(level).toEqual(SYNTHETIC_1V3);
+    expect(JSON.stringify(level)).not.toMatch(/weapon|armor|killerUV|"x"/);
   });
 });

@@ -374,12 +374,12 @@ describe("win / lose", () => {
   });
 
   it("defuse: holding E on the spike for 5 s wins; moving resets progress", () => {
-    const far = (id: Actor["id"]): Actor => ({ id, hp: 100, samples: [{ t: 0, x: 0, y: 0, u: 0.95, v: 0.9 }] });
+    const far = (id: Actor["id"]): Actor => ({ id, hp: 100, samples: [{ t: 0, u: 0.95, v: 0.9 }] });
     const w = withLevel({
       ...plantedNow,
       clutcherSide: "defense",
       startClockS: 30,
-      clutcher: { id: "P0", hp: 100, samples: [{ t: 0, x: 0, y: 0, u: 0.383, v: 0.278 }] },
+      clutcher: { id: "P0", hp: 100, samples: [{ t: 0, u: 0.383, v: 0.278 }] },
       enemies: [far("E1"), far("E2"), far("E3")],
     });
     expect(w.spike).not.toBeNull();
@@ -407,7 +407,7 @@ describe("win / lose", () => {
       ...plantedNow,
       clutcherSide: "defense",
       startClockS: 10,
-      clutcher: { id: "P0", hp: 100, samples: [{ t: 0, x: 0, y: 0, u: 0.383, v: 0.278 }] },
+      clutcher: { id: "P0", hp: 100, samples: [{ t: 0, u: 0.383, v: 0.278 }] },
     });
     let s = step(w, killAll(initState(w, 5)), NO_INPUT);
     expect(s.outcome).toBeNull();
@@ -428,7 +428,7 @@ describe("win / lose", () => {
   });
 
   it("defenders retake and defuse a planted spike when the attacking clutcher hides", () => {
-    const near = (id: Actor["id"]): Actor => ({ id, hp: 100, samples: [{ t: 0, x: 0, y: 0, u: 0.4, v: 0.3 }] });
+    const near = (id: Actor["id"]): Actor => ({ id, hp: 100, samples: [{ t: 0, u: 0.4, v: 0.3 }] });
     const w = withLevel({
       ...plantedNow,
       clutcherSide: "attack",
@@ -445,10 +445,10 @@ describe("win / lose", () => {
 
 // Real ETL output (git-ignored); skipped on a fresh clone.
 const realLevels = Object.values(
-  import.meta.glob<Level>(["../../data/levels/haven/*.json", "!**/index.json"], { eager: true, import: "default" }),
+  import.meta.glob<Level>(["../../data/levels/kiln/*.json", "!**/index.json"], { eager: true, import: "default" }),
 );
 
-describe.skipIf(realLevels.length === 0)("real haven levels", () => {
+describe.skipIf(realLevels.length === 0)("real Kiln levels", () => {
   it("every level builds, fits the 3-minute turn, and an idle round is decided by its clock", () => {
     for (const level of realLevels) {
       const w = buildWorld(KILN, level);

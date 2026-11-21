@@ -25,8 +25,9 @@ from relive_etl.levels import (
     _uv,
     build_level,
     load_validator,
-    main_weapon,
+    migrate_dir,
     semantic_errors,
+    to_public_level,
     validate_level,
 )
 from relive_etl.spike import parse_series
@@ -74,12 +75,7 @@ def synthetic_round() -> tuple[RoundData, RoundExtra]:
     ex = RoundExtra(
         side={"A": "attacker", "B": "defender"},
         hp={"a5": [(1_000, 100.0), (65_000, 74.0)], "b3": [(1_000, 100.0)]},
-        armor={"a5": [(1_000, 50.0)]},
-        weapon={"a5": [(1_000, "vandal")], "b4": [(79_000, "operator")]},
-        kills=[
-            KillInfo(t, k, v, "vandal", (100.0, -1000.0), (200.0, -1200.0))
-            for k, v, t in kills
-        ],
+        kills=[KillInfo(t, k, v, (200.0, -1200.0)) for k, v, t in kills],
         plant_xy=(4800.0, -8800.0),
         win_type="opponentEliminated",
     )
@@ -95,7 +91,7 @@ def validator() -> Any:
 def level() -> dict[str, Any]:
     rd, ex = synthetic_round()
     c = find_clutch_moments(rd)[0]
-    return build_level(rd, ex, c, CALIB, SITES, "haven")
+    return build_level(rd, ex, c, CALIB, SITES, "kiln")
 
 
 def test_built_level_is_valid_and_anonymous(
@@ -119,12 +115,20 @@ def test_built_level_is_valid_and_anonymous(
         f'"{p}"' in text for p in [*ROSTERS, "g1"]
     )  # no GRID player/game ids
     assert len(level["id"]) == 12 and level["id"] != "g1"
+    assert level["map"] == "kiln" and "haven" not in text
+
+
+def test_level_carries_only_client_fields(level: dict[str, Any]) -> None:
+    for a in [level["clutcher"], *level["enemies"]]:
+        assert set(a) <= {"id", "hp", "samples", "diedT"}
+        assert all(set(s) == {"t", "u", "v"} for s in a["samples"])
+    assert all(set(k) == {"t", "killer", "victim", "victimUV"} for k in level["kills"])
+    assert "weapon" not in json.dumps(level)
 
 
 def test_actor_fields(level: dict[str, Any]) -> None:
     p0 = level["clutcher"]
-    assert p0["id"] == "P0" and p0["hp"] == 74.0 and p0["armor"] == 50.0
-    assert p0["weapon"] == "vandal" and "diedT" not in p0
+    assert p0["id"] == "P0" and p0["hp"] == 74.0 and "diedT" not in p0
     assert p0["samples"][0]["t"] == 0 and p0["samples"][-1]["t"] == 18.0
     assert all(0 <= s["u"] <= 1 and 0 <= s["v"] <= 1 for s in p0["samples"])
     e1, e2, e3 = level["enemies"]
@@ -133,7 +137,7 @@ def test_actor_fields(level: dict[str, Any]) -> None:
     assert (
         e2["samples"] == [e2["samples"][0]] and e2["samples"][0]["t"] == 0
     )  # start only
-    assert e2["hp"] == 100.0 and e2["weapon"] == "operator"  # first weapon seen later
+    assert e2["hp"] == 100.0  # default
     assert e3["diedT"] == 18.0
 
 
@@ -144,10 +148,7 @@ def test_kills_only_between_actors_inside_window(level: dict[str, Any]) -> None:
         (10.0, "P0", "E2"),
         (18.0, "P0", "E3"),
     ]
-    assert (
-        level["kills"][0]["weapon"] == "vandal"
-        and len(level["kills"][0]["killerUV"]) == 2
-    )
+    assert len(level["kills"][0]["victimUV"]) == 2
 
 
 @pytest.mark.parametrize(
@@ -161,6 +162,10 @@ def test_kills_only_between_actors_inside_window(level: dict[str, Any]) -> None:
             "greater than the maximum",
         ),
         (lambda lv: lv.update(playerName="nope"), "Additional properties"),
+        (lambda lv: lv["clutcher"].update(weapon="rifle"), "Additional properties"),
+        (lambda lv: lv["kills"][0].update(killerUV=[0.1, 0.1]), "Additional properties"),
+        (lambda lv: lv["clutcher"]["samples"][0].update(x=1.0), "Additional properties"),
+        (lambda lv: lv.update(map="haven"), "is not one of"),
         (lambda lv: lv.update(clutchSize=4), "clutchSize 4 != 3 enemies"),
         (lambda lv: lv["kills"][0].update(t=99.0), "after round end"),
         (lambda lv: lv["clutcher"]["samples"].reverse(), "not sorted"),
@@ -190,7 +195,7 @@ def test_contract_build_level_output_matches_schema_and_semantics(
 ) -> None:
     """Contract: build_level output passes docs/level.schema.json and semantic_errors."""
     rd, ex = synthetic_round()
-    lv = build_level(rd, ex, find_clutch_moments(rd)[0], CALIB, SITES, "haven")
+    lv = build_level(rd, ex, find_clutch_moments(rd)[0], CALIB, SITES, "kiln")
     assert [e.message for e in validator.iter_errors(lv)] == []
     assert semantic_errors(lv) == []
     roundtrip = json.loads(json.dumps(lv))  # what the web game reads
@@ -201,7 +206,7 @@ def _with_same_ms_trade(rd: RoundData, ex: RoundExtra) -> None:
     """Clutcher a5 kills b3 in the same millisecond as the clutch kill, logged after it."""
     i = next(i for i, e in enumerate(rd.events) if e.t == 70_000)
     rd.events.insert(i + 1, Death(70_000, "b3", "a5"))
-    ex.kills.append(KillInfo(70_000, "a5", "b3", "vandal", (0.0, 0.0), (10.0, 10.0)))
+    ex.kills.append(KillInfo(70_000, "a5", "b3", (10.0, 10.0)))
 
 
 def test_same_ms_trade_after_clutch_sets_died_t(validator: Any) -> None:
@@ -210,7 +215,7 @@ def test_same_ms_trade_after_clutch_sets_died_t(validator: Any) -> None:
     c = find_clutch_moments(rd)[0]
     assert c.t == 70_000 and rd.events[c.event_index].victim == "a4"
     assert clutch_deaths(rd, c)["b3"] == 70_000
-    lv = build_level(rd, ex, c, CALIB, SITES, "haven")
+    lv = build_level(rd, ex, c, CALIB, SITES, "kiln")
     e1 = lv["enemies"][0]
     assert e1["diedT"] == 0.0 and [s["t"] for s in e1["samples"]] == [0.0]
     assert (0.0, "P0", "E1") in [
@@ -241,7 +246,7 @@ def test_uv_is_clamped_and_counted(validator: Any) -> None:
     rd, ex = synthetic_round()
     rd.tracks["b4"] = [(50_000, -60_000.0, -2_000.0)]  # off the minimap
     clamped = [0]
-    lv = build_level(rd, ex, find_clutch_moments(rd)[0], CALIB, SITES, "haven", clamped)
+    lv = build_level(rd, ex, find_clutch_moments(rd)[0], CALIB, SITES, "kiln", clamped)
     assert clamped == [1] and lv["enemies"][1]["samples"][0]["v"] == 1.0
     assert validate_level(lv, validator) == []
 
@@ -260,18 +265,65 @@ def test_build_level_failure_paths(breakage: Any, needle: str) -> None:
     c = find_clutch_moments(rd)[0]
     breakage(rd, ex)
     with pytest.raises(ValueError, match=needle):
-        build_level(rd, ex, c, CALIB, SITES, "haven")
+        build_level(rd, ex, c, CALIB, SITES, "kiln")
 
 
 def test_helpers() -> None:
     assert nearest_site(SITES, 1900.0, -8000.0) == "B"
     assert nearest_site({}, 0.0, 0.0) is None
-    assert (
-        main_weapon([{"name": "Classic"}, {"name": "Phantom"}, {"name": "heavyShield"}])
-        == "phantom"
+
+
+def _as_v1(level: dict[str, Any], source: str = "haven") -> dict[str, Any]:
+    """The same level in the old v1 shape (source map key, weapons, armor, x/y, killerUV)."""
+    old = copy.deepcopy(level)
+    old.update(schemaVersion=1, map=source)
+    for a in [old["clutcher"], *old["enemies"]]:
+        a.update(armor=25.0, weapon="rifle")
+        for s in a["samples"]:
+            s.update(x=1.0, y=2.0)
+    for k in old["kills"]:
+        k.update(weapon="rifle", killerUV=[0.5, 0.5])
+    return old
+
+
+def test_to_public_level_strips_v1_fields(level: dict[str, Any], validator: Any) -> None:
+    assert to_public_level(_as_v1(level)) == level
+    assert to_public_level(level) == level  # idempotent on v2
+    cistern = to_public_level(_as_v1(level, "lotus"))
+    assert cistern["map"] == "cistern" and validate_level(cistern, validator) == []
+
+
+def test_migrate_dir_rewrites_v1_export(
+    tmp_path: Path, level: dict[str, Any], validator: Any
+) -> None:
+    src = tmp_path / "haven"
+    src.mkdir()
+    (src / f"{level['id']}.json").write_text(json.dumps(_as_v1(level)), encoding="utf-8")
+    index = {"schemaVersion": 1, "map": "haven", "levels": [{"file": f"{level['id']}.json"}]}
+    (src / "index.json").write_text(json.dumps(index), encoding="utf-8")
+    assert migrate_dir(tmp_path, "haven", validator) == 1
+    assert not src.exists()
+    out = tmp_path / "kiln"
+    assert json.loads((out / f"{level['id']}.json").read_text(encoding="utf-8")) == level
+    idx = json.loads((out / "index.json").read_text(encoding="utf-8"))
+    assert idx["map"] == "kiln" and idx["schemaVersion"] == 2
+    assert [e["id"] for e in idx["levels"]] == [level["id"]]
+
+
+def test_migrate_dir_keeps_source_on_invalid_level(
+    tmp_path: Path, level: dict[str, Any], validator: Any
+) -> None:
+    src = tmp_path / "haven"
+    src.mkdir()
+    bad = _as_v1(level)
+    bad["clutchSize"] = 4
+    (src / f"{level['id']}.json").write_text(json.dumps(bad), encoding="utf-8")
+    (src / "index.json").write_text(
+        json.dumps({"levels": [{"file": f"{level['id']}.json"}]}), encoding="utf-8"
     )
-    assert main_weapon([{"name": "Ghost"}, {"name": "lightShield"}]) == "ghost"
-    assert main_weapon([{"name": "spike"}]) is None
+    with pytest.raises(SystemExit, match="clutchSize"):
+        migrate_dir(tmp_path, "haven", validator)
+    assert (src / "index.json").is_file() and not (tmp_path / "kiln").exists()
 
 
 def _write_feed(path: Path, events: list[tuple[int, dict[str, Any]]]) -> None:
@@ -331,7 +383,7 @@ def _ev(
     }
 
 
-def test_collector_reads_side_hp_weapon_kills_and_win_type(tmp_path: Path) -> None:
+def test_collector_reads_side_hp_kills_and_win_type(tmp_path: Path) -> None:
     game = {"type": "game", "id": "g1"}
     pos = {"game": {"position": {"x": 1.0, "y": 2.0}}}
     events = [
@@ -405,9 +457,8 @@ def test_collector_reads_side_hp_weapon_kills_and_win_type(tmp_path: Path) -> No
     assert len(rounds) == 1 and rounds[0].game_id == "g1"
     ex = col.rounds[("g1", 2)]
     assert ex.side == {"A": "attacker", "B": "defender"}
-    assert ex.hp["a1"][-1][1] == 60.0 and ex.armor["a1"][-1][1] == 0.0
-    assert ex.weapon["a3"][-1][1] == "spectre" and ex.weapon["b1"][-1][1] == "vandal"
-    assert [(k.killer, k.victim, k.weapon, k.victim_xy) for k in ex.kills] == [
-        ("b1", "a1", "vandal", (1.0, 2.0))
+    assert ex.hp["a1"][-1][1] == 60.0
+    assert [(k.killer, k.victim, k.victim_xy) for k in ex.kills] == [
+        ("b1", "a1", (1.0, 2.0))
     ]
     assert ex.plant_xy == (1.0, 2.0) and ex.win_type == "bombExploded"

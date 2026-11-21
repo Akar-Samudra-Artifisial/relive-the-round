@@ -17,6 +17,10 @@ LEVELS_DATA_DIR = (
 
 DEFAULT_DATA_DIR = PROJECT_ROOT.parent / "stl-hackathon-2026-grid-starter"
 
+# Source map key (GRID / calibration, internal only) -> original map id used in public files
+# (level JSON, data/levels/<id>/, the web client). Source keys never reach players.
+PUBLIC_MAP_IDS = {"haven": "kiln", "lotus": "cistern"}
+
 
 def data_dir() -> Path:
     """Return the GRID starter data directory, validating that it looks right."""

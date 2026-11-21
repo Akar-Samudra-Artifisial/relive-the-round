@@ -1,8 +1,13 @@
-"""Export ranked clutch candidates as level JSON files (schema v1, see docs/level-schema.md).
+"""Export ranked clutch candidates as level JSON files (schema v2, see docs/level-schema.md).
 
 Usage: STL_DATA_DIR=... uv run relive-export-levels --map haven --top 12
-Output goes to the git-ignored data/levels/<map>/ (derived from GRID data, never committed).
-Level files carry no player/team/series names or ids; the level id is a short hash.
+`--map` takes the source map key; output goes to the git-ignored data/levels/<public map id>/
+(e.g. data/levels/kiln/; derived from GRID data, never committed). Level files carry only what
+the web client uses: no player/team/series names or ids, no weapon names, no raw GRID positions
+and the original map id (kiln/cistern) instead of the source map key; the level id is a short hash.
+
+`uv run relive-migrate-levels` rewrites schema-v1 exports (data/levels/<source map key>/) into
+that v2 shape without re-reading the GRID feeds.
 """
 
 from __future__ import annotations
@@ -10,6 +15,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import statistics
 from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor
@@ -20,12 +26,12 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .clutch import Clutch, RoundData, clutch_deaths, find_clutch_moments
-from .config import DOCS_DIR, LEVELS_DATA_DIR, data_dir
+from .config import DOCS_DIR, LEVELS_DATA_DIR, PUBLIC_MAP_IDS, data_dir
 from .geometry import MapCalib, load_calibs, load_site_callouts, nearest_site, to_uv
 from .grid_io import series_feed
 from .spike import parse_series
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA_PATH = DOCS_DIR / "level.schema.json"
 DEFAULT_HP = 100.0
 
@@ -36,12 +42,6 @@ WIN_REASON = {
     "timeExpired": "time",
 }
 SIDE = {"attacker": "attack", "defender": "defense"}
-SIDEARMS = ("classic", "shorty", "frenzy", "ghost", "sheriff", "bandit")
-PRIMARIES = (
-    "stinger", "spectre", "bucky", "judge", "bulldog", "guardian", "phantom", "vandal",
-    "marshal", "outlaw", "operator", "ares", "odin",
-)  # fmt: skip
-WEAPONS = frozenset(SIDEARMS + PRIMARIES + ("knife", "melee"))
 
 XY = tuple[float, float]
 
@@ -51,19 +51,15 @@ class KillInfo:
     t: int
     killer: str
     victim: str
-    weapon: str | None
-    killer_xy: XY | None
     victim_xy: XY | None
 
 
 @dataclass
 class RoundExtra:
-    """Per-round details the spike walker does not keep (hp, armor, weapons, kill positions)."""
+    """Per-round details the spike walker does not keep (hp, kill positions, plant, win type)."""
 
     side: dict[str, str] = field(default_factory=dict)  # team id -> attacker/defender
     hp: dict[str, list[tuple[int, float]]] = field(default_factory=dict)
-    armor: dict[str, list[tuple[int, float]]] = field(default_factory=dict)
-    weapon: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
     kills: list[KillInfo] = field(default_factory=list)
     plant_xy: XY | None = None
     win_type: str | None = None
@@ -74,21 +70,6 @@ def _xy(state: dict[str, Any] | None) -> XY | None:
     if pos.get("x") is None or pos.get("y") is None:
         return None
     return float(pos["x"]), float(pos["y"])
-
-
-def weapon_name(raw: object) -> str | None:
-    name = str(raw or "").strip().lower()
-    return name if name in WEAPONS else None
-
-
-def main_weapon(items: list[dict[str, Any]]) -> str | None:
-    """Best weapon of an inventory: a primary if carried, otherwise a sidearm."""
-    names = [weapon_name(it.get("name") or it.get("id")) for it in items]
-    owned = [n for n in names if n]
-    for n in owned:
-        if n in PRIMARIES:
-            return n
-    return next((n for n in owned if n in SIDEARMS), None)
 
 
 class Collector:
@@ -119,38 +100,18 @@ class Collector:
                     pid = str(p.get("id"))
                     if isinstance(p.get("currentHealth"), (int, float)):
                         ex.hp.setdefault(pid, []).append((t, float(p["currentHealth"])))
-                    if isinstance(p.get("currentArmor"), (int, float)):
-                        ex.armor.setdefault(pid, []).append(
-                            (t, float(p["currentArmor"]))
-                        )
-                    w = main_weapon((p.get("inventory") or {}).get("items") or [])
-                    if w:
-                        ex.weapon.setdefault(pid, []).append((t, w))
         if target.get("type") == "player":
             tg = (target.get("state") or {}).get("game") or {}
             tid = str(target.get("id"))
             if isinstance(tg.get("currentHealth"), (int, float)):
                 ex.hp.setdefault(tid, []).append((t, float(tg["currentHealth"])))
-            if isinstance(tg.get("currentArmor"), (int, float)):
-                ex.armor.setdefault(tid, []).append((t, float(tg["currentArmor"])))
-        delta = (actor.get("stateDelta") or {}).get("game") or {}
-        if etype == "player-damaged-player":
-            for src in delta.get("damageDealtSources") or []:
-                w = weapon_name((src.get("source") or {}).get("name"))
-                if w:
-                    ex.weapon.setdefault(str(actor.get("id")), []).append((t, w))
-        elif etype in ("player-killed-player", "player-selfkilled-player"):
-            w = next((weapon_name(k) for k in (delta.get("weaponKills") or {})), None)
+        if etype in ("player-killed-player", "player-selfkilled-player"):
             killer = str(actor.get("id"))
             victim = str(target.get("id") or killer)
-            if w and etype == "player-killed-player":
-                ex.weapon.setdefault(killer, []).append((t, w))
             vxy = _xy(target.get("state")) or (
                 _xy(actor.get("state")) if victim == killer else None
             )
-            ex.kills.append(
-                KillInfo(t, killer, victim, w, _xy(actor.get("state")), vxy)
-            )
+            ex.kills.append(KillInfo(t, killer, victim, vxy))
         elif etype == "player-!killed-player":
             victim, killer = str(target.get("id")), str(actor.get("id"))
             for i in range(len(ex.kills) - 1, -1, -1):
@@ -198,10 +159,12 @@ def build_level(
     c: Clutch,
     calib: MapCalib,
     sites: dict[str, XY],
-    map_name: str,
+    map_id: str,
     uv_clamped: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Turn one clutch into a schema-v1 level dict (relative seconds, actor aliases).
+    """Turn one clutch into a schema-v2 level dict (relative seconds, actor aliases).
+
+    `map_id` is the public map id (`PUBLIC_MAP_IDS` value, e.g. "kiln"), never the source key.
 
     `uv_clamped[0]`, if given, is incremented for every u/v point clamped into [0, 1].
     Raises ValueError when the round cannot make a level (missing position, side, plant).
@@ -232,23 +195,13 @@ def build_level(
         samples = []
         for t, x, y in pts:
             u, v = uv(x, y)
-            samples.append(
-                {"t": rel(t), "x": round(x, 1), "y": round(y, 1), "u": u, "v": v}
-            )
+            samples.append({"t": rel(t), "u": u, "v": v})
         hp = _value_at(ex.hp.get(pid, []), t0)
         out: dict[str, Any] = {
             "id": alias[pid],
             "hp": hp if hp and hp > 0 else DEFAULT_HP,
+            "samples": samples,
         }
-        armor = _value_at(ex.armor.get(pid, []), t0)
-        if armor is not None:
-            out["armor"] = max(0.0, armor)
-        weapon = _value_at(ex.weapon.get(pid, []), t0) or next(
-            (w for t, w in ex.weapon.get(pid, []) if t0 < t <= stop), None
-        )
-        if weapon:
-            out["weapon"] = weapon
-        out["samples"] = samples
         if pid in deaths and deaths[pid] <= end:
             out["diedT"] = rel(deaths[pid])
         return out
@@ -257,18 +210,16 @@ def build_level(
     for k in ex.kills:
         if not (t0 <= k.t <= end) or k.killer not in alias or k.victim not in alias:
             continue
-        if k.killer_xy is None or k.victim_xy is None:
+        if k.victim_xy is None:
             continue
-        kill: dict[str, Any] = {
-            "t": rel(k.t),
-            "killer": alias[k.killer],
-            "victim": alias[k.victim],
-        }
-        if k.weapon:
-            kill["weapon"] = k.weapon
-        kill["killerUV"] = list(uv(*k.killer_xy))
-        kill["victimUV"] = list(uv(*k.victim_xy))
-        kills.append(kill)
+        kills.append(
+            {
+                "t": rel(k.t),
+                "killer": alias[k.killer],
+                "victim": alias[k.victim],
+                "victimUV": list(uv(*k.victim_xy)),
+            }
+        )
 
     planted = rd.plant_t is not None and rd.plant_t <= end
     spike: dict[str, Any] = {"planted": planted}
@@ -289,7 +240,7 @@ def build_level(
     return {
         "schemaVersion": SCHEMA_VERSION,
         "id": level_id(rd.game_id, rd.number, t0),
-        "map": map_name,
+        "map": map_id,
         "clutchSize": len(c.opponents),
         "clutcherSide": side,
         "clutcherWon": won,
@@ -433,9 +384,7 @@ def render_export_report(
             f"enemies with a single (start) sample: {sum(n == 1 for n in enemy_n)} of {len(enemy_n)}.",
             f"- Kills inside the clutch windows: {sum(len(lv['kills']) for lv in levels)}.",
             f"- Actors with hp from the feed vs default {DEFAULT_HP:g}: "
-            f"{sum(a['hp'] != DEFAULT_HP for a in actors)} non-default of {len(actors)}; "
-            f"armor known: {sum('armor' in a for a in actors)}; weapon known: "
-            f"{sum('weapon' in a for a in actors)}.",
+            f"{sum(a['hp'] != DEFAULT_HP for a in actors)} non-default of {len(actors)}.",
             f"- Actors with diedT: {sum('diedT' in a for a in actors)} of {len(actors)}.",
             f"- u/v points clamped into [0, 1]: {uv_clamped} (in {levels_clamped} levels).",
             "",
@@ -468,6 +417,7 @@ def main(argv: list[str] | None = None) -> None:
         if c["map"] == a.map
     ]
     chosen = [{**c, "_rank": i} for i, c in enumerate(ranked[: a.top])]
+    map_id = PUBLIC_MAP_IDS[a.map]
     calib = load_calibs().get(a.map)
     sites = load_site_callouts().get(a.map, {})
     if calib is None:
@@ -477,7 +427,7 @@ def main(argv: list[str] | None = None) -> None:
     for c in chosen:
         by_series[c["series_id"]].append(c)
     jobs = [
-        (series_feed(root, sid), cs, calib, sites, a.map)
+        (series_feed(root, sid), cs, calib, sites, map_id)
         for sid, cs in by_series.items()
     ]
 
@@ -488,7 +438,7 @@ def main(argv: list[str] | None = None) -> None:
             results.extend(part)
     results.sort(key=lambda r: r[0])
 
-    out_dir = a.out_dir / a.map
+    out_dir = a.out_dir / map_id
     out_dir.mkdir(parents=True, exist_ok=True)
     old_index = out_dir / "index.json"
     if old_index.is_file():  # drop files of the previous export only
@@ -513,9 +463,24 @@ def main(argv: list[str] | None = None) -> None:
         levels.append(level)
         uv_clamped += n_clamped
         levels_clamped += n_clamped > 0
-    index = {
+    old_index.write_text(json.dumps(level_index(map_id, levels), indent=1), encoding="utf-8")
+    report = a.report or DOCS_DIR / f"level-export-{a.map}.md"
+    report.write_text(
+        render_export_report(map_id, levels, failed, uv_clamped, levels_clamped),
+        encoding="utf-8",
+    )
+    print(
+        f"[export] {len(levels)} valid levels, {failed} failed, {uv_clamped} uv clamped "
+        f"-> {out_dir}; report -> {report}",
+        flush=True,
+    )
+
+
+def level_index(map_id: str, levels: list[dict[str, Any]]) -> dict[str, Any]:
+    """`data/levels/<map id>/index.json`: the levels in ranking order."""
+    return {
         "schemaVersion": SCHEMA_VERSION,
-        "map": a.map,
+        "map": map_id,
         "levels": [
             {
                 "id": lv["id"],
@@ -527,17 +492,87 @@ def main(argv: list[str] | None = None) -> None:
             for lv in levels
         ],
     }
-    old_index.write_text(json.dumps(index, indent=1), encoding="utf-8")
-    report = a.report or DOCS_DIR / f"level-export-{a.map}.md"
-    report.write_text(
-        render_export_report(a.map, levels, failed, uv_clamped, levels_clamped),
-        encoding="utf-8",
-    )
-    print(
-        f"[export] {len(levels)} valid levels, {failed} failed, {uv_clamped} uv clamped "
-        f"-> {out_dir}; report -> {report}",
-        flush=True,
-    )
+
+
+def to_public_level(level: dict[str, Any]) -> dict[str, Any]:
+    """Schema-v1 (or v2) level -> v2: public map id, only the fields the web client reads.
+
+    Drops weapon names, armor, raw GRID x/y and killer positions; everything else is copied.
+    """
+
+    def actor(a: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "id": a["id"],
+            "hp": a["hp"],
+            "samples": [{"t": s["t"], "u": s["u"], "v": s["v"]} for s in a["samples"]],
+        }
+        if "diedT" in a:
+            out["diedT"] = a["diedT"]
+        return out
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "id": level["id"],
+        "map": PUBLIC_MAP_IDS.get(level["map"], level["map"]),
+        "clutchSize": level["clutchSize"],
+        "clutcherSide": level["clutcherSide"],
+        "clutcherWon": level["clutcherWon"],
+        "startClockS": level["startClockS"],
+        "plantedAtStart": level["plantedAtStart"],
+        "durationS": level["durationS"],
+        "spike": dict(level["spike"]),
+        "clutcher": actor(level["clutcher"]),
+        "enemies": [actor(e) for e in level["enemies"]],
+        "kills": [
+            {k: kill[k] for k in ("t", "killer", "victim", "victimUV")}
+            for kill in level["kills"]
+        ],
+        "outcome": dict(level["outcome"]),
+    }
+
+
+def migrate_dir(
+    levels_dir: Path, source: str, validator: Draft202012Validator
+) -> int:
+    """Rewrite `levels_dir/<source>/` (schema v1) into `levels_dir/<public id>/` and remove it.
+
+    Every level is converted and validated before anything is written, so a bad file leaves
+    the old export untouched. Returns the number of migrated levels.
+    """
+    src = levels_dir / source
+    dst = levels_dir / PUBLIC_MAP_IDS[source]
+    index = json.loads((src / "index.json").read_text(encoding="utf-8"))
+    levels = []
+    for entry in index.get("levels", []):
+        name = str(entry.get("file", ""))
+        lv = to_public_level(json.loads((src / name).read_text(encoding="utf-8")))
+        errs = validate_level(lv, validator)
+        if errs or name != f"{lv['id']}.json":
+            raise SystemExit(f"[migrate] {source}/{name}: {'; '.join(errs[:3]) or 'bad name'}")
+        levels.append(lv)
+    dst.mkdir(parents=True, exist_ok=True)
+    for lv in levels:
+        (dst / f"{lv['id']}.json").write_text(json.dumps(lv), encoding="utf-8")
+    index_text = json.dumps(level_index(dst.name, levels), indent=1)
+    (dst / "index.json").write_text(index_text, encoding="utf-8")
+    shutil.rmtree(src)
+    return len(levels)
+
+
+def migrate_main(argv: list[str] | None = None) -> None:
+    """Migrate schema-v1 exports in data/levels/<source map key>/ to v2 (no GRID feeds needed)."""
+    ap = argparse.ArgumentParser(description=migrate_main.__doc__)
+    ap.add_argument("--levels-dir", type=Path, default=LEVELS_DATA_DIR)
+    a = ap.parse_args(argv)
+    validator = load_validator()
+    done = 0
+    for source in PUBLIC_MAP_IDS:
+        if (a.levels_dir / source / "index.json").is_file():
+            n = migrate_dir(a.levels_dir, source, validator)
+            print(f"[migrate] {n} levels -> {a.levels_dir / PUBLIC_MAP_IDS[source]}", flush=True)
+            done += 1
+    if not done:
+        print(f"[migrate] nothing to migrate in {a.levels_dir}", flush=True)
 
 
 if __name__ == "__main__":

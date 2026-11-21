@@ -13,6 +13,7 @@ dependencies = [
 [project.scripts]
 relive-spike = "relive_etl.spike:main"
 relive-export-levels = "relive_etl.levels:main"
+relive-migrate-levels = "relive_etl.levels:migrate_main"
 relive-calib-anchors = "relive_etl.calib:main"
 
 [build-system]

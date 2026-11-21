@@ -7,10 +7,14 @@ the Vercel project (a Git build would have no levels and the repo must not hold 
 
 ## What ships
 
-- `web/src/game/featured.json` — the playlist (max 6): 3 haven levels (Kiln) + 3 lotus levels (Cistern).
+- `web/src/game/featured.json` — the playlist (max 6): 3 Kiln levels + 3 Cistern levels (`map`: `kiln` / `cistern`).
+- Level files are schema v2 (`docs/level-schema.md`): original map ids only, no weapon names, armor,
+  raw GRID positions or killer positions. Convert older v1 exports with
+  `cd etl && uv run relive-migrate-levels` before building.
 - `pnpm -C web build:public` runs:
   1. `scripts/prepare-public.mjs` — empties `web/public/levels/`, copies the featured files from
-     `data/levels/<map>/`; fails on a missing file, more than 6 entries, or an existing `web/public/calib/`.
+     `data/levels/<map>/` (`kiln` / `cistern`); fails on a missing file, more than 6 entries, or an
+     existing `web/public/calib/`.
   2. `VITE_REQUIRE_LEVELS=1 pnpm build` — a level that fails to load throws instead of falling back
      to the synthetic fixture.
   3. `scripts/verify-dist.mjs` — `dist/index.html` must exist and `dist/levels/` must equal the

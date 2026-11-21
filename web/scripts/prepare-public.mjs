@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX_FEATURED = 6;
-const MAPS = new Set(["haven", "lotus"]);
+const MAPS = new Set(["kiln", "cistern"]);
 const web = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = join(web, "..", "data", "levels");
 const outDir = join(web, "public", "levels");

@@ -4,7 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Relive the Round</title>
+    <meta name="description" content="Real pro esports clutch rounds rebuilt as a 2D mini game. Take over the last player standing, then compare your run with the real round." />
+    <meta name="theme-color" content="#14110f" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Link previews. Crawlers never see the #c=... fragment, so challenge links share this card. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Relive the Round" />
+    <meta property="og:title" content="Relive the Round - could you have clutched it?" />
+    <meta property="og:description" content="Real 1vN pro clutch rounds. You are the last one standing. Play the round, then beat the pro - or beat my score." />
+    <meta property="og:url" content="https://relive-the-round.vercel.app/" />
+    <meta property="og:image" content="https://relive-the-round.vercel.app/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Relive the Round: a crosshair logo, the title and an abstract top-down floor plan with enemy paths." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Relive the Round - could you have clutched it?" />
+    <meta name="twitter:description" content="Real 1vN pro clutch rounds. You are the last one standing. Play the round, then beat the pro - or beat my score." />
+    <meta name="twitter:image" content="https://relive-the-round.vercel.app/og-image.png" />
+    <meta name="twitter:image:alt" content="Relive the Round: a crosshair logo, the title and an abstract top-down floor plan with enemy paths." />
     <style>
       body { margin: 0; background: #14110f; color: #e8e1d6; font: 13px/1.4 system-ui, sans-serif; }
       [hidden] { display: none !important; }
@@ -44,6 +62,17 @@
       #resultRows td { padding: 2px 16px; font-size: 16px; }
       #initials { width: 5ch; font: inherit; font-size: 22px; text-transform: uppercase; text-align: center; background: #2b2420; color: #ffd479; border: 1px solid #8a7a66; border-radius: 6px; }
       #fps { position: fixed; right: 8px; bottom: 6px; color: #6bff95; font-size: 12px; }
+      #idle { cursor: pointer; gap: 22px; }
+      #idleSlide { display: flex; flex-direction: column; gap: 6px; min-height: 64px; max-width: 80vw; }
+      #idleSlide b { font-size: 24px; color: #e8e1d6; }
+      #idleSlide span { color: #a89c8c; font-size: 15px; }
+      #idleBoard { list-style: none; padding: 0; margin: 0; font-size: 17px; }
+      #idlePrompt { font-size: 20px; color: #ffd479; animation: idle-pulse 1.6s ease-in-out infinite; }
+      @keyframes idle-pulse { 50% { opacity: 0.35; } }
+      @media (prefers-reduced-motion: reduce) { #idlePrompt { animation: none; } }
+      #kioskReset { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 10; display: flex; flex-direction: column; gap: 12px; align-items: center; padding: 20px 28px; background: #2b2420; border: 1px solid #ffd479; border-radius: 8px; box-shadow: 0 8px 32px #000; }
+      #kioskReset p { margin: 0; font-size: 18px; }
+      #kioskReset .actions { display: flex; gap: 12px; }
       #countdown { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; color: #ffd479; text-shadow: 0 2px 8px #000; }
       #countdown[hidden] { display: none; }
       #countdownNum { font-size: 120px; font-weight: bold; }
@@ -102,6 +131,24 @@
         <p class="dim">WASD move · mouse aim · click shoot · hold E to defuse · Esc quit</p>
         <h3>Top scores</h3>
         <ol id="board"></ol>
+      </div>
+
+      <div id="idle" class="overlay" hidden>
+        <h1>Could you have clutched it?</h1>
+        <p>Real pro clutch rounds. You are the last one standing.</p>
+        <div id="idleSlide"><b id="idleSlideTitle"></b><span id="idleSlideBlurb"></span></div>
+        <h3>Top scores</h3>
+        <ol id="idleBoard"></ol>
+        <p id="idlePrompt">Press any key or click to play</p>
+      </div>
+
+      <div id="kioskReset" role="dialog" aria-modal="true" aria-labelledby="kioskResetTitle" hidden>
+        <p id="kioskResetTitle">Clear all local scores?</p>
+        <div class="actions">
+          <button id="kioskResetClear" type="button">Clear</button>
+          <button id="kioskResetCancel" type="button">Cancel</button>
+        </div>
+        <p id="kioskResetMsg" class="dim" role="status"></p>
       </div>
 
       <div id="scoreScreen" class="overlay" hidden>

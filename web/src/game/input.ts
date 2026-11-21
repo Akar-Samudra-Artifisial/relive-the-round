@@ -1,7 +1,8 @@
 import type { Vec2 } from "../sim/geom";
 import type { Input } from "../sim/sim";
 
-export type Screen = "attract" | "play" | "score" | "replay";
+/** `attract` is the level select; `idle` is the kiosk-only attract loop shown over it. */
+export type Screen = "attract" | "idle" | "play" | "score" | "replay";
 
 /** Raw device snapshot: held key codes (`KeyboardEvent.code`), pointer position on the canvas (px), left button. */
 export type RawControls = {

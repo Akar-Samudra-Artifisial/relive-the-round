@@ -6,7 +6,7 @@ import type { Level } from "../src/level/types";
 import { mapFor } from "../src/maps";
 import { buildWorld } from "../src/sim/world";
 
-/** Lotus (Cistern) levels picked by the harness sweep for the event playlist (featured.json must list them; see featured.test.ts). */
+/** Cistern levels picked by the harness sweep for the event playlist (featured.json must list them; see featured.test.ts). */
 const CISTERN_PICKS: readonly string[] = ["1273a6914b4e.json", "90163e309394.json", "edc320bb8210.json"];
 const HARNESS_FILES = [...new Set([...FEATURED.map((f) => f.file), ...CISTERN_PICKS])];
 
@@ -35,7 +35,7 @@ const LOCKED_WIN_RATE: Readonly<Record<string, number>> = {
   df244e8f378d: 0.38,
   "010a7b04f8c3": 0.6,
   bc9dc2b1daac: 0.38,
-  // Cistern (lotus)
+  // Cistern
   "1273a6914b4e": 0.42,
   "90163e309394": 0.36,
   edc320bb8210: 0.56,

@@ -1,8 +1,8 @@
 [
-  { "map": "haven", "file": "df244e8f378d.json", "id": "df244e8f378d", "title": "Quick draw" },
-  { "map": "haven", "file": "010a7b04f8c3.json", "id": "010a7b04f8c3", "title": "Ninja defuse" },
-  { "map": "haven", "file": "bc9dc2b1daac.json", "id": "bc9dc2b1daac", "title": "Hold the line" },
-  { "map": "lotus", "file": "1273a6914b4e.json", "id": "1273a6914b4e", "title": "Post-plant sweep" },
-  { "map": "lotus", "file": "90163e309394.json", "id": "90163e309394", "title": "Fast trade" },
-  { "map": "lotus", "file": "edc320bb8210.json", "id": "edc320bb8210", "title": "Retake defuse" }
+  { "map": "kiln", "file": "df244e8f378d.json", "id": "df244e8f378d", "title": "Quick draw" },
+  { "map": "kiln", "file": "010a7b04f8c3.json", "id": "010a7b04f8c3", "title": "Ninja defuse" },
+  { "map": "kiln", "file": "bc9dc2b1daac.json", "id": "bc9dc2b1daac", "title": "Hold the line" },
+  { "map": "cistern", "file": "1273a6914b4e.json", "id": "1273a6914b4e", "title": "Post-plant sweep" },
+  { "map": "cistern", "file": "90163e309394.json", "id": "90163e309394", "title": "Fast trade" },
+  { "map": "cistern", "file": "edc320bb8210.json", "id": "edc320bb8210", "title": "Retake defuse" }
 ]

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://relive-the-round.local/level.schema.json",
-  "title": "Relive the Round level (schema v1)",
-  "description": "One real 1vN clutch rebuilt as a playable level. t = seconds since the clutch moment (0 = the kill that created the 1vN). x,y = raw GRID cm; u,v = to_uv(x, y) in 0..1 (origin top-left). No player, team or series names/ids.",
+  "title": "Relive the Round level (schema v2)",
+  "description": "One real 1vN clutch rebuilt as a playable level. t = seconds since the clutch moment (0 = the kill that created the 1vN). u,v = to_uv(x, y) of the raw GRID position in 0..1 (origin top-left). Only fields the web client uses: no player, team or series names/ids, no weapon names, no raw positions; map is the original map id.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,13 +22,13 @@
     "outcome"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9-]{6,32}$",
       "description": "Short hash; never a GRID id."
     },
-    "map": { "enum": ["haven", "lotus"] },
+    "map": { "enum": ["kiln", "cistern"], "description": "Original map id; never the source map name." },
     "clutchSize": { "type": "integer", "minimum": 2, "maximum": 5 },
     "clutcherSide": { "enum": ["attack", "defense"] },
     "clutcherWon": { "type": "boolean" },
@@ -88,13 +88,11 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["t", "killer", "victim", "killerUV", "victimUV"],
+        "required": ["t", "killer", "victim", "victimUV"],
         "properties": {
           "t": { "type": "number", "minimum": 0 },
           "killer": { "$ref": "#/$defs/actorId" },
           "victim": { "$ref": "#/$defs/actorId" },
-          "weapon": { "type": "string", "minLength": 1 },
-          "killerUV": { "$ref": "#/$defs/uv" },
           "victimUV": { "$ref": "#/$defs/uv" }
         }
       }
@@ -126,19 +124,15 @@
       "properties": {
         "id": { "$ref": "#/$defs/actorId" },
         "hp": { "type": "number", "exclusiveMinimum": 0, "maximum": 150 },
-        "armor": { "type": "number", "minimum": 0, "maximum": 100 },
-        "weapon": { "type": "string", "minLength": 1 },
         "samples": {
           "type": "array",
           "minItems": 1,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["t", "x", "y", "u", "v"],
+            "required": ["t", "u", "v"],
             "properties": {
               "t": { "type": "number", "minimum": 0 },
-              "x": { "type": "number" },
-              "y": { "type": "number" },
               "u": { "$ref": "#/$defs/unit" },
               "v": { "$ref": "#/$defs/unit" }
             }
