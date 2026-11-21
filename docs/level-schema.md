@@ -1,0 +1,65 @@
+# Level schema v1
+
+Contract between the ETL (`relive-export-levels`) and the web game. Machine-readable version:
+[`level.schema.json`](level.schema.json) (JSON Schema draft 2020-12). Every exported file is
+validated against it plus the semantic checks listed below; invalid levels are not written.
+
+Level files are derived from GRID data, so they live only in the git-ignored
+`data/levels/<map>/` directory and are never committed. They contain no player, team or series
+names or ids.
+
+## Conventions
+
+- `t`: seconds since the clutch moment; `t = 0` is the kill that created the 1vN.
+- `x`, `y`: raw GRID position in cm (2D, no `z`).
+- `u`, `v`: `to_uv(x, y)` with the valorant-api calibration of the map, normalised 0..1, origin
+  top-left. The game draws an original 2D map in the same normalised frame.
+- Actor ids: `P0` = the clutcher (controlled by the player), `E1`..`E5` = enemies alive at `t = 0`.
+
+## Shape
+
+```
+{ schemaVersion: 1, id: string (short hash, not a GRID id), map: "haven"|"lotus",
+  clutchSize: 2..5, clutcherSide: "attack"|"defense", clutcherWon: boolean,
+  startClockS: number, plantedAtStart: boolean, durationS: number,
+  spike: { planted: boolean, plantT?: number, site?: "A"|"B"|"C", u?: number, v?: number },
+  clutcher: Actor, enemies: Actor[],
+  kills: [{ t, killer: actorId, victim: actorId, weapon?: string, killerUV:[u,v], victimUV:[u,v] }],
+  outcome: { winner: "clutcher"|"enemies", t: number, reason: "elimination"|"defuse"|"detonate"|"time"|"unknown" } }
+Actor = { id: "P0" | "E1".."E5", hp: number, armor?: number, weapon?: string,
+  samples: [{ t: number, x: number, y: number, u: number, v: number }], diedT?: number }
+```
+
+## Fields
+
+| Field | Meaning / source |
+|---|---|
+| `id` | First 12 hex chars of SHA-256 over the GRID game id, round number and clutch time. Not reversible without the data. |
+| `clutchSize` | Number of enemies alive at `t = 0` (= `enemies.length`). |
+| `clutcherSide` | Side of the clutcher's team in the round (`seriesState.games[].teams[].side`). |
+| `startClockS` | GRID round clock (seconds left) at `t = 0`. After a plant the clock is the spike timer. |
+| `plantedAtStart` | Spike planted at or before `t = 0`. |
+| `durationS` | `t` of the round decision (`team-won-round`). Equals `outcome.t`. |
+| `spike` | `plantT` is relative and negative when planted before `t = 0`. `site` = nearest valorant-api site callout to the plant position. `plantT`, `site`, `u`, `v` are present only when `planted` is true. |
+| `Actor.hp` / `armor` | Last value at or before `t = 0` from the round's full snapshot (freeze-time end) updated by damage events. `hp` falls back to 100 if unknown. |
+| `Actor.weapon` | Last weapon seen at or before `t = 0` (freeze-end inventory, damage sources, kill weapon); otherwise the first one seen later in the window. Lowercase VALORANT weapon name. |
+| `Actor.samples` | Change-only positions. The first sample is always `t = 0` (the last known position; for an actor first seen after `t = 0`, that first position). Samples stop at `diedT` or `durationS`. Enemies may have a single sample (relaxed rule: only the clutcher track has to be dense, enemies are bot-driven). |
+| `Actor.diedT` | First death after `t = 0`, if before the round decision. |
+| `kills` | Kills with `0 <= t <= durationS` where both killer and victim are actors. A self-kill has `killer == victim`. `weapon` is the `weaponKills` key when GRID has it. |
+| `outcome.reason` | GRID `winType`: `opponentEliminated` -> `elimination`, `bombDefused` -> `defuse`, `bombExploded` -> `detonate`, `timeExpired` -> `time`, otherwise `unknown`. |
+
+## Semantic checks (beyond JSON Schema)
+
+- `enemies.length == clutchSize` and enemy ids are exactly `E1..En` in order.
+- Every actor's samples start at `t = 0`, are sorted by `t` and end at or before `diedT`/`durationS`.
+- `diedT`, kill `t` <= `durationS`; kill actor ids exist.
+- `outcome.t == durationS`; `outcome.winner == "clutcher"` iff `clutcherWon`.
+
+## Index file
+
+`data/levels/<map>/index.json` lists the exported levels in ranking order:
+
+```
+{ schemaVersion: 1, map: "haven"|"lotus",
+  levels: [{ id: string, file: "<id>.json", clutchSize: number, won: boolean, durationS: number }] }
+```

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Relive the Round</title>
+    <style>
+      body { margin: 0; background: #14110f; color: #e8e1d6; font: 13px/1.4 system-ui, sans-serif; }
+      [hidden] { display: none !important; }
+      #controls { display: flex; gap: 12px; align-items: center; padding: 8px 12px; flex-wrap: wrap; }
+      #time { width: 360px; }
+      #error { color: #ff7a6b; padding: 0 12px; white-space: pre-wrap; }
+      #stage { padding: 0 12px 12px; }
+
+      #game { position: relative; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+      #hud { display: flex; gap: 20px; padding: 8px 12px; font-size: 16px; align-items: baseline; flex-wrap: wrap; justify-content: center; }
+      #hud b { color: #ffd479; }
+      #hudGoal { color: #a89c8c; font-size: 13px; }
+      #gameStage { padding: 0 12px 12px; }
+      .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: rgba(20, 17, 15, 0.94); text-align: center; }
+      .overlay h1 { font-size: 40px; margin: 0; color: #ffd479; }
+      .overlay h2 { font-size: 34px; margin: 0; color: #ffd479; }
+      .overlay button { background: #2b2420; color: #e8e1d6; border: 1px solid #8a7a66; border-radius: 6px; padding: 10px 16px; font: inherit; font-size: 15px; cursor: pointer; }
+      .overlay button:hover, .overlay button:focus-visible { border-color: #ffd479; outline: none; }
+      #levelButtons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+      #levelButtons button { display: flex; flex-direction: column; gap: 4px; min-width: 220px; }
+      #levelButtons span, .dim { color: #a89c8c; font-size: 12px; }
+      #board { list-style: none; padding: 0; margin: 0; font-size: 15px; }
+      #resultRows th { text-align: left; padding: 2px 16px 2px 0; color: #a89c8c; font-weight: normal; }
+      #resultRows td { padding: 2px 16px; font-size: 16px; }
+      #initials { width: 5ch; font: inherit; font-size: 22px; text-transform: uppercase; text-align: center; background: #2b2420; color: #ffd479; border: 1px solid #8a7a66; border-radius: 6px; }
+      #fps { position: fixed; right: 8px; bottom: 6px; color: #6bff95; font-size: 12px; }
+      #countdown { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; color: #ffd479; text-shadow: 0 2px 8px #000; }
+      #countdown[hidden] { display: none; }
+      #countdownNum { font-size: 120px; font-weight: bold; }
+      #countdownHint { font-size: 18px; color: #e8e1d6; }
+    </style>
+  </head>
+  <body>
+    <div id="debug" hidden>
+      <div id="controls">
+        <button id="play" type="button">Play</button>
+        <input id="time" type="range" min="0" max="1" step="0.01" value="0" />
+        <span id="clock">0.00 s</span>
+        <label><input id="showNav" type="checkbox" /> navmesh</label>
+        <label><input id="showWarp" type="checkbox" /> warp/landmarks</label>
+        <label><input id="showRails" type="checkbox" checked /> rails</label>
+        <label id="densityToggle" hidden><input id="showDensity" type="checkbox" /> density (dev)</label>
+        <span id="levelName"></span>
+      </div>
+      <div id="stage"></div>
+    </div>
+
+    <div id="game" hidden>
+      <div id="hud" hidden>
+        <span id="hudLevel"></span>
+        <span>HP <b id="hudHp"></b></span>
+        <span>Enemies <b id="hudEnemies"></b></span>
+        <span>Clock <b id="hudClock"></b></span>
+        <span>Spike <b id="hudSpike"></b></span>
+        <span id="hudGoal"></span>
+      </div>
+      <div id="gameStage"></div>
+
+      <div id="attract" class="overlay" hidden>
+        <h1>Could you have clutched it?</h1>
+        <p>Real pro clutch rounds. You are the last one standing. Pick a round:</p>
+        <div id="levelButtons"></div>
+        <button id="randomLevel" type="button">Random round (Enter)</button>
+        <p class="dim">WASD move · mouse aim · click shoot · hold E to defuse · Esc quit</p>
+        <h3>Top scores</h3>
+        <ol id="board"></ol>
+      </div>
+
+      <div id="scoreScreen" class="overlay" hidden>
+        <h2 id="resultTitle"></h2>
+        <p id="resultReason"></p>
+        <table>
+          <thead><tr><th></th><td>You</td><td>Pro</td></tr></thead>
+          <tbody id="resultRows"></tbody>
+        </table>
+        <p id="resultPro"></p>
+        <p>Score <b id="resultPoints"></b></p>
+        <p>
+          <input id="initials" maxlength="3" placeholder="AAA" autocomplete="off" aria-label="Your initials" />
+          <button id="saveScore" type="button">Save</button>
+        </p>
+        <p id="initialsMsg" class="dim" role="status">Type 3 letters and press Enter to save · Enter with an empty box skips</p>
+        <button id="nextPlayer" type="button">Next player (skip)</button>
+        <p class="dim">Back to start in <span id="returnIn"></span> s</p>
+      </div>
+      <div id="countdown" hidden>
+        <div id="countdownNum"></div>
+        <div id="countdownHint">WASD move · mouse aim · click shoot · hold E on the spike to defuse</div>
+      </div>
+      <div id="fps" hidden></div>
+    </div>
+    <div id="error"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

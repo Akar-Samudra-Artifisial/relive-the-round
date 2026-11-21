@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://relive-the-round.local/level.schema.json",
+  "title": "Relive the Round level (schema v1)",
+  "description": "One real 1vN clutch rebuilt as a playable level. t = seconds since the clutch moment (0 = the kill that created the 1vN). x,y = raw GRID cm; u,v = to_uv(x, y) in 0..1 (origin top-left). No player, team or series names/ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "map",
+    "clutchSize",
+    "clutcherSide",
+    "clutcherWon",
+    "startClockS",
+    "plantedAtStart",
+    "durationS",
+    "spike",
+    "clutcher",
+    "enemies",
+    "kills",
+    "outcome"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{6,32}$",
+      "description": "Short hash; never a GRID id."
+    },
+    "map": { "enum": ["haven", "lotus"] },
+    "clutchSize": { "type": "integer", "minimum": 2, "maximum": 5 },
+    "clutcherSide": { "enum": ["attack", "defense"] },
+    "clutcherWon": { "type": "boolean" },
+    "startClockS": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Round clock (seconds left) at t = 0; the spike timer if planted."
+    },
+    "plantedAtStart": { "type": "boolean" },
+    "durationS": { "type": "number", "minimum": 0 },
+    "spike": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planted"],
+      "properties": {
+        "planted": { "type": "boolean" },
+        "plantT": {
+          "type": "number",
+          "description": "Negative when planted before the clutch moment."
+        },
+        "site": { "enum": ["A", "B", "C"] },
+        "u": { "$ref": "#/$defs/unit" },
+        "v": { "$ref": "#/$defs/unit" }
+      },
+      "if": { "properties": { "planted": { "const": true } } },
+      "then": { "required": ["plantT", "site", "u", "v"] },
+      "else": {
+        "not": {
+          "anyOf": [
+            { "required": ["plantT"] },
+            { "required": ["site"] },
+            { "required": ["u"] },
+            { "required": ["v"] }
+          ]
+        }
+      }
+    },
+    "clutcher": {
+      "allOf": [
+        { "$ref": "#/$defs/actor" },
+        { "properties": { "id": { "const": "P0" } } }
+      ]
+    },
+    "enemies": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 5,
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/actor" },
+          { "properties": { "id": { "pattern": "^E[1-5]$" } } }
+        ]
+      }
+    },
+    "kills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["t", "killer", "victim", "killerUV", "victimUV"],
+        "properties": {
+          "t": { "type": "number", "minimum": 0 },
+          "killer": { "$ref": "#/$defs/actorId" },
+          "victim": { "$ref": "#/$defs/actorId" },
+          "weapon": { "type": "string", "minLength": 1 },
+          "killerUV": { "$ref": "#/$defs/uv" },
+          "victimUV": { "$ref": "#/$defs/uv" }
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["winner", "t", "reason"],
+      "properties": {
+        "winner": { "enum": ["clutcher", "enemies"] },
+        "t": { "type": "number", "minimum": 0 },
+        "reason": { "enum": ["elimination", "defuse", "detonate", "time", "unknown"] }
+      }
+    }
+  },
+  "$defs": {
+    "unit": { "type": "number", "minimum": 0, "maximum": 1 },
+    "uv": {
+      "type": "array",
+      "prefixItems": [{ "$ref": "#/$defs/unit" }, { "$ref": "#/$defs/unit" }],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "actorId": { "type": "string", "pattern": "^(P0|E[1-5])$" },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "hp", "samples"],
+      "properties": {
+        "id": { "$ref": "#/$defs/actorId" },
+        "hp": { "type": "number", "exclusiveMinimum": 0, "maximum": 150 },
+        "armor": { "type": "number", "minimum": 0, "maximum": 100 },
+        "weapon": { "type": "string", "minLength": 1 },
+        "samples": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["t", "x", "y", "u", "v"],
+            "properties": {
+              "t": { "type": "number", "minimum": 0 },
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "u": { "$ref": "#/$defs/unit" },
+              "v": { "$ref": "#/$defs/unit" }
+            }
+          }
+        },
+        "diedT": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

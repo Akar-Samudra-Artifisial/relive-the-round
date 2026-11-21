@@ -1,0 +1,32 @@
+# Sky's The Limit 2026 hackathon data: licensed, must not be committed
+stl-hackathon-2026-grid-starter/
+grid-starter/
+*.zst
+*.jsonl
+*.parquet
+*.sqlite
+*.duckdb
+# Derived data / generated levels (contain reconstructions of GRID data)
+data/
+levels/
+# dev-only copy of calibration rasters for the debug page
+web/public/calib/
+
+# Python
+etl/.cache/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Secrets
+.env*
+!.env.example
+
+# Web
+node_modules/
+dist/
+
+.DS_Store
+.idea/
