@@ -6,12 +6,25 @@ import { segmentClear, type Vec2 } from "../sim/geom";
 import { clockAt, NO_INPUT, simTimeAt, type Input, type ShotEvent, type SimState } from "../sim/sim";
 import { buildWorld, type World } from "../sim/world";
 import { createAutopilot, type Autopilot } from "./autopilot";
+import { qrMatrix, renderCard, type QrMatrix } from "./cardImage";
+import { challengeLines, landingAction, replayKeyAction } from "./challengeLanding";
 import { blocksDefault, mapInput, type Screen } from "./input";
 import { addEntry, normalizeInitials, topEntries, validInitials } from "./leaderboard";
 import { FEATURED, loadFeatured, type LoadedLevel } from "./levels";
+import { buildYouTimeline } from "./replayModel";
+import { ReplayView, type ReplaySpeed } from "./replayView";
 import { scoreRound, type ScoreCard } from "./score";
 import { Session } from "./session";
-import { COUNTDOWN_S, MAX_SESSION_S, roundLimitS, SCORE_RETURN_S, sessionBudgetS, shouldAbortPlay } from "./timing";
+import { challengeFromCard, challengeUrl, publicBaseUrl, type Challenge } from "./share";
+import {
+  COUNTDOWN_S,
+  MAX_SESSION_S,
+  REPLAY_MAX_S,
+  roundLimitS,
+  SCORE_RETURN_S,
+  sessionBudgetS,
+  shouldAbortPlay,
+} from "./timing";
 
 const ENEMY_COLOR = 0xff6b5a;
 const PLAYER_COLOR = 0x5ad1ff;
@@ -25,6 +38,28 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 type Tracer = { shot: ShotEvent; untilMs: number };
+
+/** Buttons and form fields handle Enter/Space/arrows natively; global shortcuts must not double up. */
+function isControl(t: EventTarget | null): boolean {
+  return t instanceof HTMLButtonElement || t instanceof HTMLInputElement;
+}
+
+/** Paints a QR matrix (with a 4-module quiet zone) onto a small canvas, whole pixels per module. */
+function paintQr(canvas: HTMLCanvasElement, m: QrMatrix): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const n = m.length + 8;
+  const cell = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / n));
+  const off = Math.floor((canvas.width - cell * n) / 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#000000";
+  m.forEach((row, r) =>
+    row.forEach((dark, c) => {
+      if (dark) ctx.fillRect(off + (c + 4) * cell, off + (r + 4) * cell, cell, cell);
+    }),
+  );
+}
 
 const REASON_TEXT: Record<ScoreCard["reason"], string> = {
   elimination: "Eliminated them all",
@@ -43,7 +78,8 @@ class Controls {
   constructor(canvas: HTMLCanvasElement, screen: () => Screen) {
     addEventListener("keydown", (e) => {
       this.keys.add(e.code);
-      if (blocksDefault(e.code, screen())) e.preventDefault();
+      // In the replay a focused control (speed button, slider) keeps its native Space/arrow behaviour.
+      if (blocksDefault(e.code, screen()) && !(screen() === "replay" && isControl(e.target))) e.preventDefault();
     });
     addEventListener("keyup", (e) => this.keys.delete(e.code));
     addEventListener("blur", () => {
@@ -118,6 +154,23 @@ export async function startGame(): Promise<void> {
   let scoreDeadline = 0;
   let card: ScoreCard | null = null;
   let saved = false;
+  /** Session of the round shown on the score screen (seed + recording feed the replay). */
+  let finished: Session | null = null;
+  let replay: ReplayView | null = null;
+  let replayDeadline = 0;
+  let replayEnded = false;
+  /** Challenge from `#c=…` waiting on the attract screen. */
+  let pending: { challenge: Challenge; level: LoadedLevel } | null = null;
+  /** Challenge being played this round (compared on the score screen). */
+  let roundChallenge: Challenge | null = null;
+  let shareUrl = "";
+  let shareQr: QrMatrix | null = null;
+
+  const replayBar = el<HTMLDivElement>("replayBar");
+  const replaySlider = el<HTMLInputElement>("replaySlider");
+  const replayToggle = el<HTMLButtonElement>("replayToggle");
+  const speedButtons = [...replayBar.querySelectorAll<HTMLButtonElement>("button[data-speed]")];
+  const shareMsg = el<HTMLParagraphElement>("shareMsg");
 
   const show = (next: Screen): void => {
     screen = next;
@@ -125,6 +178,8 @@ export async function startGame(): Promise<void> {
     scoreScreen.hidden = next !== "score";
     hud.hidden = next !== "play";
     countdownEl.hidden = next !== "play";
+    replayBar.hidden = next !== "replay";
+    root.visible = next !== "replay";
     app.canvas.style.visibility = next === "attract" ? "hidden" : "visible";
   };
 
@@ -150,10 +205,35 @@ export async function startGame(): Promise<void> {
     el<HTMLOListElement>("board").replaceChildren(...rows);
   };
 
-  const startLevel = (l: LoadedLevel): void => {
+  const renderChallenge = (): void => {
+    el<HTMLElement>("challenge").hidden = pending === null;
+    if (!pending) return;
+    el<HTMLParagraphElement>("challengeLevel").textContent = `Round: ${pending.level.featured.title}`;
+    el<HTMLUListElement>("challengeStats").replaceChildren(
+      ...challengeLines(pending.challenge).map((line) => {
+        const li = document.createElement("li");
+        li.textContent = line;
+        return li;
+      }),
+    );
+  };
+
+  /** Reads `#c=…`; anything invalid is ignored and the normal attract screen shows. */
+  const readHash = (): void => {
+    const action = landingAction(
+      location.hash,
+      loaded.map((l) => l.level.id),
+    );
+    pending = action.kind === "challenge" ? { challenge: action.challenge, level: loaded[action.levelIndex]! } : null;
+    renderChallenge();
+  };
+
+  const startLevel = (l: LoadedLevel, seed?: number): void => {
     const world = worlds.get(l)!;
     current = l;
-    session = new Session(world, fixedSeed !== null ? Number(fixedSeed) >>> 0 : randomSeed(), COUNTDOWN_S);
+    finished = null;
+    const s = seed ?? (fixedSeed !== null ? Number(fixedSeed) >>> 0 : randomSeed());
+    session = new Session(world, s, COUNTDOWN_S);
     pilot = auto ? createAutopilot(world) : null;
     playStartedMs = performance.now();
     tracers = [];
@@ -167,38 +247,167 @@ export async function startGame(): Promise<void> {
     show("play");
   };
 
+  const beatChallenge = (): void => {
+    if (!pending) return;
+    const { challenge, level } = pending;
+    pending = null;
+    // One-shot: the next player on this kiosk gets the normal attract screen.
+    history.replaceState(null, "", location.pathname + location.search);
+    renderChallenge();
+    roundChallenge = challenge;
+    startLevel(level, challenge.seed);
+  };
+
+  /** Tears the replay down (ticker listener + Pixi objects); safe to call when none is open. */
+  const closeReplay = (): void => {
+    if (replay) app.renderer.resize(size, size);
+    replay?.destroy();
+    replay = null;
+    replayEnded = false;
+  };
+
   const toAttract = (): void => {
+    closeReplay();
     session = null;
     pilot = null;
     current = null;
     card = null;
+    finished = null;
+    roundChallenge = null;
     renderBoard();
+    renderChallenge();
     show("attract");
+    if (pending && !auto) el<HTMLButtonElement>("beatThis").focus();
   };
 
-  const toScore = (s: SimState, l: LoadedLevel): void => {
+  const toScore = (s: SimState, l: LoadedLevel, sess: Session): void => {
     card = scoreRound(l.level, s);
+    finished = sess;
     saved = false;
     scoreDeadline = performance.now() + SCORE_RETURN_S * 1000;
     el<HTMLHeadingElement>("resultTitle").textContent = card.won ? "Clutched!" : "Not this time";
     el<HTMLParagraphElement>("resultReason").textContent = REASON_TEXT[card.reason];
-    el<HTMLTableSectionElement>("resultRows").innerHTML = [
+    const rows: [string, string, string][] = [
       ["Result", card.won ? "Won" : "Lost", card.proWon ? "Won" : "Lost"],
       ["Time", `${card.timeS.toFixed(1)} s`, `${card.proTimeS.toFixed(1)} s`],
       ["Kills", `${card.kills} / ${card.enemies}`, "—"],
       ["HP left", String(card.hpLeft), "—"],
       ["Accuracy", `${Math.round(card.accuracy * 100)}%`, "—"],
-    ]
-      .map(([a, b, c]) => `<tr><th>${a}</th><td>${b}</td><td>${c}</td></tr>`)
-      .join("");
+    ];
+    el<HTMLTableSectionElement>("resultRows").replaceChildren(
+      ...rows.map(([label, you, pro]) => {
+        const tr = document.createElement("tr");
+        const th = document.createElement("th");
+        th.scope = "row";
+        th.textContent = label;
+        const a = document.createElement("td");
+        a.textContent = you;
+        const b = document.createElement("td");
+        b.textContent = pro;
+        tr.append(th, a, b);
+        return tr;
+      }),
+    );
     el<HTMLParagraphElement>("resultPro").textContent = `Pro #1: ${card.proWon ? "won" : "lost"} in ${card.proTimeS.toFixed(1)} s`;
     el<HTMLSpanElement>("resultPoints").textContent = String(card.points);
+    const vs = el<HTMLParagraphElement>("resultChallenge");
+    vs.hidden = roundChallenge === null;
+    if (roundChallenge) {
+      vs.textContent =
+        card.points > roundChallenge.points
+          ? `You beat the challenge (${roundChallenge.points} points)!`
+          : `Challenge: ${roundChallenge.points} points — not beaten this time.`;
+    }
+    shareUrl = challengeUrl(publicBaseUrl(), challengeFromCard(l.level.id, sess.seed, card));
+    shareQr = qrMatrix(shareUrl);
+    paintQr(el<HTMLCanvasElement>("resultQr"), shareQr);
+    shareMsg.textContent = "";
+    el<HTMLButtonElement>("downloadCard").disabled = false;
     const initials = el<HTMLInputElement>("initials");
     initials.value = "";
     el<HTMLButtonElement>("saveScore").disabled = false;
     el<HTMLParagraphElement>("initialsMsg").textContent = INITIALS_HINT;
     show("score");
     if (!auto) initials.focus();
+  };
+
+  /** Back from the replay: the score screen gets a fresh auto-return timer. */
+  const backToScore = (): void => {
+    closeReplay();
+    scoreDeadline = performance.now() + SCORE_RETURN_S * 1000;
+    show("score");
+    if (!auto) el<HTMLButtonElement>("watchReplay").focus();
+  };
+
+  const setReplayPlaying = (playing: boolean): void => {
+    if (!replay) return;
+    if (playing) replay.play();
+    else replay.pause();
+    replayToggle.textContent = playing ? "Pause" : "Play";
+  };
+
+  const setReplaySpeed = (speed: ReplaySpeed): void => {
+    replay?.setSpeed(speed);
+    for (const b of speedButtons) b.setAttribute("aria-pressed", String(b.dataset.speed === String(speed)));
+  };
+
+  const toReplay = (): void => {
+    if (!finished || !card || screen !== "score") return;
+    closeReplay();
+    const timeline = buildYouTimeline(finished.world, finished.seed, finished.recording);
+    // Two square panels side by side: shrink the canvas to their height (+ title row) meanwhile.
+    const replayH = Math.ceil((size - 16) / 2) + 40;
+    app.renderer.resize(size, replayH);
+    const view = new ReplayView({
+      world: finished.world,
+      timeline,
+      width: size,
+      height: replayH,
+      onTime: (t, startT, endT) => {
+        replaySlider.value = String(t);
+        const label = `${(t - startT).toFixed(1)} / ${(endT - startT).toFixed(1)} s`;
+        el<HTMLSpanElement>("replayTime").textContent = label;
+        replaySlider.setAttribute("aria-valuetext", label);
+      },
+      // Leaving inside the ticker callback would destroy the view mid-update; the main loop does it.
+      onEnd: () => (replayEnded = true),
+    });
+    replay = view;
+    replaySlider.min = String(view.startT);
+    replaySlider.max = String(view.endT);
+    replaySlider.value = String(view.startT);
+    app.stage.addChild(view.view);
+    view.attach(app.ticker);
+    setReplaySpeed(1);
+    setReplayPlaying(true);
+    replayEnded = false;
+    replayDeadline = performance.now() + REPLAY_MAX_S * 1000;
+    show("replay");
+    if (!auto) replayToggle.focus();
+  };
+
+  const downloadCard = async (): Promise<void> => {
+    if (!card || !current || !shareQr) return;
+    const btn = el<HTMLButtonElement>("downloadCard");
+    const result = { levelTitle: current.featured.title, card, url: shareUrl };
+    btn.disabled = true;
+    shareMsg.textContent = "Creating card…";
+    try {
+      const blob = await renderCard(result, shareQr);
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = `relive-the-round-${result.card.points}.png`;
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 10_000);
+      shareMsg.textContent = "Card downloaded.";
+    } catch {
+      shareMsg.textContent = "Could not create the card on this device.";
+    } finally {
+      btn.disabled = false;
+    }
   };
 
   // Attract screen buttons.
@@ -246,18 +455,48 @@ export async function startGame(): Promise<void> {
     input.value = normalizeInitials(input.value);
   });
 
+  el<HTMLButtonElement>("beatThis").addEventListener("click", beatChallenge);
+  el<HTMLButtonElement>("watchReplay").addEventListener("click", toReplay);
+  el<HTMLButtonElement>("downloadCard").addEventListener("click", () => void downloadCard());
+  replayToggle.addEventListener("click", () => setReplayPlaying(!(replay?.isPlaying ?? false)));
+  for (const b of speedButtons) b.addEventListener("click", () => setReplaySpeed(Number(b.dataset.speed) as ReplaySpeed));
+  replaySlider.addEventListener("input", () => replay?.setTime(Number(replaySlider.value)));
+  el<HTMLButtonElement>("replayExit").addEventListener("click", backToScore);
+  addEventListener("hashchange", () => {
+    readHash();
+    if (screen === "attract") toAttract();
+  });
+
   addEventListener("keydown", (e) => {
     // A held Enter/Space must not chain screens (e.g. save → attract → random level).
-    if (e.repeat && (e.key === "Enter" || e.code === "Space")) return;
+    // A focused button activates itself on Enter; the global shortcut must not fire as well.
+    const onButton = e.target instanceof HTMLButtonElement;
+    if (e.repeat && (e.key === "Enter" || e.code === "Space")) {
+      // Auto-repeat would click the freshly focused button (Watch replay / Beat this) over and over.
+      if (onButton) e.preventDefault();
+      return;
+    }
     if (screen === "attract") {
       const n = Number(e.key);
       if (n >= 1 && n <= loaded.length) startLevel(loaded[n - 1]!);
-      else if (e.key === "Enter") startRandom();
-    } else if (screen === "score" && e.key === "Enter") {
+      else if (e.key === "Enter" && !onButton) {
+        if (pending) beatChallenge();
+        else startRandom();
+      }
+    } else if (screen === "score" && e.key === "Enter" && !onButton) {
       // Empty box = explicit skip; anything else must be valid initials.
       if (el<HTMLInputElement>("initials").value === "" || saveScore()) toAttract();
     } else if (screen === "play" && e.key === "Escape") {
       toAttract();
+    } else if (screen === "replay" && replay) {
+      const action = replayKeyAction(e.key);
+      if (!action) return;
+      // Focused controls keep their native Space/arrow handling (no double toggle/seek).
+      if (isControl(e.target) && (e.key === " " || e.key.startsWith("Arrow"))) return;
+      if (action.kind === "toggle") setReplayPlaying(!replay.isPlaying);
+      else if (action.kind === "speed") setReplaySpeed(action.speed);
+      else if (action.kind === "seek") replay.setTime(replay.time + action.deltaS);
+      else backToScore();
     }
   });
 
@@ -273,6 +512,13 @@ export async function startGame(): Promise<void> {
       fpsFrames = 0;
     }
 
+    if (screen === "replay") {
+      // The score timer is paused here; the replay has its own hard cap back to the (unsaved) score
+      // screen, which then restarts its own auto-return timer.
+      if (performance.now() > replayDeadline) backToScore();
+      else if (replayEnded) backToScore();
+      return;
+    }
     if (screen === "score") {
       const left = Math.max(0, Math.ceil((scoreDeadline - performance.now()) / 1000));
       el<HTMLSpanElement>("returnIn").textContent = String(left);
@@ -301,7 +547,7 @@ export async function startGame(): Promise<void> {
 
     drawDynamic(dyn, world, s, input, tracers);
     updateHud(world, s);
-    if (s.outcome) toScore(s, current);
+    if (s.outcome) toScore(s, current, session);
   });
 
   if (import.meta.env.DEV) {
@@ -313,10 +559,14 @@ export async function startGame(): Promise<void> {
         state: () => session?.state ?? null,
         countdown: () => session?.countdown ?? null,
         recording: () => session?.recording.length ?? 0,
+        replay: () => (replay ? { t: replay.time, startT: replay.startT, endT: replay.endT, playing: replay.isPlaying } : null),
+        shareUrl: () => shareUrl,
+        challenge: () => pending?.challenge ?? null,
       },
     });
   }
 
+  readHash();
   if (auto || params.has("level")) {
     const idx = Math.min(loaded.length - 1, Math.max(0, Number(params.get("level") ?? 0) || 0));
     startLevel(loaded[idx]!);

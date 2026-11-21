@@ -1,7 +1,7 @@
 import type { Vec2 } from "../sim/geom";
 import type { Input } from "../sim/sim";
 
-export type Screen = "attract" | "play" | "score";
+export type Screen = "attract" | "play" | "score" | "replay";
 
 /** Raw device snapshot: held key codes (`KeyboardEvent.code`), pointer position on the canvas (px), left button. */
 export type RawControls = {
@@ -25,7 +25,10 @@ export function mapInput(raw: RawControls, scale: number): Input {
   };
 }
 
-/** Swallow page scrolling keys only while playing, so menus and the initials field behave normally. */
+/**
+ * Swallow page scrolling keys only while playing or watching a replay (where Space/arrows are
+ * replay shortcuts), so menus and the initials field behave normally.
+ */
 export function blocksDefault(code: string, screen: Screen): boolean {
-  return screen === "play" && (code.startsWith("Arrow") || code === "Space");
+  return (screen === "play" || screen === "replay") && (code.startsWith("Arrow") || code === "Space");
 }

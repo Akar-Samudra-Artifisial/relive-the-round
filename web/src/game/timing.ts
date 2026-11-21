@@ -6,6 +6,8 @@ import type { World } from "../sim/world";
 export const COUNTDOWN_S = 3;
 /** Score screen returns to attract on its own after this long. */
 export const SCORE_RETURN_S = 15;
+/** Hard cap on the replay screen; after this the kiosk returns to attract. */
+export const REPLAY_MAX_S = 45;
 /** Event rule: one player's turn (start → play → score → back to attract) fits in 3 minutes. */
 export const MAX_SESSION_S = 180;
 
