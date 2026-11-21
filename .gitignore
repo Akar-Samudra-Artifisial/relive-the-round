@@ -7,10 +7,10 @@ grid-starter/
 *.sqlite
 *.duckdb
 # Derived data / generated levels (contain reconstructions of GRID data)
-data/
-levels/
+/data/
+/web/public/levels/
 # dev-only copy of calibration rasters for the debug page
-web/public/calib/
+/web/public/calib/
 
 # Python
 etl/.cache/
@@ -27,6 +27,7 @@ __pycache__/
 # Web
 node_modules/
 dist/
+.vercel/
 
 .DS_Store
 .idea/
