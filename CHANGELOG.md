@@ -5,6 +5,7 @@ Semua perubahan penting dicatat di sini. Format mengikuti Keep a Changelog, vers
 ## [Unreleased]
 
 ### Added
+- Touch controls for phones: a twin-stick overlay on the play screen (left stick moves, right stick aims and fires past 70 % tilt) plus a hold-to-use DEFUSE button that appears only in spike range. It turns on for coarse pointers or the first touch, hides again on keyboard/mouse input, and can be pinned with `?touch=1`. Portrait phones get the controls below the map, landscape phones get translucent corner pads. Touch hints replace "hold E". Desktop controls are unchanged. Holding DEFUSE suppresses touch fire so a resting thumb cannot cancel the defuse (keyboard/mouse unchanged); the compact landscape layout applies only in touch mode, so short desktop windows keep the regular HUD.
 - Replay dua panel setelah ronde: gerakanmu ("you") dan pro diputar berdampingan.
 - Score card PNG yang bisa diunduh, dengan QR berisi tautan tantangan (`/#c=…`) untuk mengajak orang lain memainkan ronde yang sama.
 - Peta orisinal Cistern untuk level lotus, plus 3 level lotus di playlist (total 6: 3 haven di Kiln + 3 lotus di Cistern).

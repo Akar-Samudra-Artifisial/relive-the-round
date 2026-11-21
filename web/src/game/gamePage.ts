@@ -19,6 +19,8 @@ import { buildYouTimeline, replayLayout } from "./replayModel";
 import { ReplayView, type ReplaySpeed } from "./replayView";
 import { scoreRound, type ScoreCard } from "./score";
 import { Session } from "./session";
+import { controlsHint, defuseAvailable, goalText, nextTouchActive, type TouchModeEvent } from "./touch";
+import { TouchControls } from "./touchControls";
 import { challengeFromCard, challengeUrl, publicBaseUrl, type Challenge } from "./share";
 import {
   COUNTDOWN_S,
@@ -83,8 +85,17 @@ class Controls {
   hasAimed = false;
   private firing = false;
 
-  /** `logicalWidth`: current stage width in logical px (app.screen.width), not canvas.width. */
-  constructor(canvas: HTMLCanvasElement, screen: () => Screen, logicalWidth: () => number) {
+  /**
+   * `logicalWidth`: current stage width in logical px (app.screen.width), not canvas.width.
+   * While touch mode is on, finger taps on the canvas are ignored (the on-screen sticks aim and fire).
+   */
+  constructor(
+    canvas: HTMLCanvasElement,
+    screen: () => Screen,
+    logicalWidth: () => number,
+    private readonly touch: TouchControls,
+    touchActive: () => boolean,
+  ) {
     addEventListener("keydown", (e) => {
       this.keys.add(e.code);
       // In the replay a focused control (speed button, slider) keeps its native Space/arrow behaviour.
@@ -94,15 +105,18 @@ class Controls {
     addEventListener("blur", () => {
       this.keys.clear();
       this.firing = false;
+      touch.release();
     });
+    const ignored = (e: PointerEvent): boolean => e.pointerType === "touch" && touchActive();
     // CSS may shrink the canvas and HiDPI renders it at resolution × size: map to logical px.
     const toCanvas = (e: PointerEvent): Vec2 => clientToCanvas(e.clientX, e.clientY, canvas.getBoundingClientRect(), logicalWidth());
     canvas.addEventListener("pointermove", (e) => {
+      if (ignored(e)) return;
       this.aimPx = toCanvas(e);
       this.hasAimed = true;
     });
     canvas.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || ignored(e)) return;
       this.aimPx = toCanvas(e);
       this.hasAimed = true;
       this.firing = true;
@@ -111,8 +125,11 @@ class Controls {
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
-  read(scale: number): Input {
-    return mapInput({ keys: this.keys, aimPx: this.aimPx, pointerDown: this.firing }, scale);
+  /** `player`: clutcher position (cm), the origin of the touch aim. */
+  read(scale: number, player: Vec2): Input {
+    const touch = this.touch.overrides(player);
+    if (touch?.aim) this.hasAimed = true;
+    return mapInput({ keys: this.keys, aimPx: this.aimPx, pointerDown: this.firing, touch }, scale);
   }
 }
 
@@ -168,7 +185,11 @@ export async function startGame(): Promise<void> {
   const countdownEl = el<HTMLDivElement>("countdown");
 
   let screen: Screen = "attract";
-  const controls = new Controls(app.canvas, () => screen, () => app.screen.width);
+  const touchControls = new TouchControls(el<HTMLDivElement>("touchControls"));
+  // ?touch=1 pins touch mode on (desktop testing); otherwise coarse pointers start in touch mode.
+  const touchForced = params.get("touch") === "1";
+  let touchActive = touchForced || matchMedia("(pointer: coarse)").matches;
+  const controls = new Controls(app.canvas, () => screen, () => app.screen.width, touchControls, () => touchActive);
   let session: Session | null = null;
   let pilot: Autopilot | null = null;
   let playStartedMs = 0;
@@ -214,7 +235,25 @@ export async function startGame(): Promise<void> {
     replayBar.hidden = next !== "replay";
     root.visible = next !== "replay";
     app.canvas.style.visibility = next === "attract" || next === "idle" ? "hidden" : "visible";
+    if (next !== "play") touchControls.reset();
+    applyInputMode();
   };
+
+  /** Overlay visibility and control hints follow the active input (touch vs. keyboard/mouse). */
+  function applyInputMode(): void {
+    gameEl.dataset.touch = touchActive ? "1" : "0";
+    touchControls.setVisible(screen === "play" && touchActive);
+    el<HTMLDivElement>("countdownHint").textContent = controlsHint(touchActive);
+    if (current) el<HTMLSpanElement>("hudGoal").textContent = goalText(current.level.clutcherSide, touchActive);
+  }
+  const inputEvent = (ev: TouchModeEvent): void => {
+    const next = nextTouchActive(touchActive, ev, touchForced);
+    if (next === touchActive) return;
+    touchActive = next;
+    applyInputMode();
+  };
+  addEventListener("pointerdown", (e) => inputEvent(e.pointerType === "touch" ? "touch" : e.pointerType === "pen" ? "pen" : "mouse"), { capture: true });
+  addEventListener("keydown", () => inputEvent("key"), { capture: true });
 
   /** Top-5 rows for the level select and the kiosk attract loop (fresh nodes per call). */
   const boardRows = (): HTMLLIElement[] => {
@@ -306,8 +345,8 @@ export async function startGame(): Promise<void> {
     const cssK = Math.min(1, (innerWidth - 2 * STAGE_PAD) / size);
     root.addChild(drawMap(world.map, { cssPxPerUnit: scale * cssK }), dyn);
     el<HTMLSpanElement>("hudLevel").textContent = `${l.featured.title}${l.synthetic ? " (synthetic)" : ""}`;
-    el<HTMLSpanElement>("hudGoal").textContent =
-      l.level.clutcherSide === "defense" ? "Defend: hold E on the spike for 5 s, or win the fight" : "Attack: survive until the spike blows, or win the fight";
+    touchControls.reset();
+    touchControls.setDefuseVisible(false);
     show("play");
   };
 
@@ -764,7 +803,7 @@ export async function startGame(): Promise<void> {
     }
     const before = session.state.tick;
     // Autopilot is consulted once per sim tick (frame-rate independent); humans per frame.
-    const human = pilot ? null : controls.read(scale);
+    const human = pilot ? null : controls.read(scale, session.state.clutcher);
     session.advance(ticker.deltaMS, pilot ?? human!);
     const input = human ?? session.recording[session.recording.length - 1] ?? NO_INPUT;
     const cd = session.countdown;
@@ -778,6 +817,7 @@ export async function startGame(): Promise<void> {
     // Autopilot input always carries a real aim; a human's only after the pointer touched the canvas.
     drawDynamic(dyn, world, s, pilot || controls.hasAimed ? input.aim : null, tracers, now);
     updateHud(world, s);
+    touchControls.setDefuseVisible(touchControls.visible && defuseAvailable(world, s));
     if (s.outcome) toScore(s, current, session);
   });
 

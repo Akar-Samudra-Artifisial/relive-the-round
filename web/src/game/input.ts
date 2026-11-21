@@ -4,25 +4,39 @@ import type { Input } from "../sim/sim";
 /** `attract` is the level select; `idle` is the kiosk-only attract loop shown over it. */
 export type Screen = "attract" | "idle" | "play" | "score" | "replay";
 
+/** On-screen touch controls: analog move in the unit circle, aim as a world point (cm), fire, use. */
+export type TouchOverrides = {
+  readonly move?: Vec2;
+  readonly aim?: Vec2;
+  readonly fire?: boolean;
+  readonly use?: boolean;
+};
+
 /** Raw device snapshot: held key codes (`KeyboardEvent.code`), pointer position on the canvas (px), left button. */
 export type RawControls = {
   readonly keys: ReadonlySet<string>;
   readonly aimPx: Vec2;
   readonly pointerDown: boolean;
+  readonly touch?: TouchOverrides;
 };
 
 /**
  * Device → sim input. WASD/arrows move (opposite keys cancel), the pointer aims (canvas px →
- * world cm via `scale` px/cm), left click or Space fires, holding E defuses.
+ * world cm via `scale` px/cm), left click or Space fires, holding E defuses. Optional touch
+ * overrides merge in: keyboard move wins when non-zero, touch aim replaces the pointer aim,
+ * fire/use are ORed.
  */
 export function mapInput(raw: RawControls, scale: number): Input {
   if (!(scale > 0)) throw new Error(`mapInput: scale must be > 0, got ${scale}`);
   const k = (...codes: string[]): number => (codes.some((c) => raw.keys.has(c)) ? 1 : 0);
+  const t = raw.touch;
+  const keyMove = { x: k("KeyD", "ArrowRight") - k("KeyA", "ArrowLeft"), y: k("KeyS", "ArrowDown") - k("KeyW", "ArrowUp") };
+  const move = keyMove.x === 0 && keyMove.y === 0 && t?.move ? { x: t.move.x, y: t.move.y } : keyMove;
   return {
-    move: { x: k("KeyD", "ArrowRight") - k("KeyA", "ArrowLeft"), y: k("KeyS", "ArrowDown") - k("KeyW", "ArrowUp") },
-    aim: { x: raw.aimPx.x / scale, y: raw.aimPx.y / scale },
-    fire: raw.pointerDown || raw.keys.has("Space"),
-    use: raw.keys.has("KeyE"),
+    move,
+    aim: t?.aim ? { x: t.aim.x, y: t.aim.y } : { x: raw.aimPx.x / scale, y: raw.aimPx.y / scale },
+    fire: raw.pointerDown || raw.keys.has("Space") || t?.fire === true,
+    use: raw.keys.has("KeyE") || t?.use === true,
   };
 }
 

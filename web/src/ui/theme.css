@@ -255,6 +255,75 @@ kbd {
 }
 @keyframes count-pop { 0% { transform: scale(1.18); opacity: 0.4; } 25% { transform: scale(1); opacity: 1; } }
 
+/* ---------- touch controls (play screen, touch input only) ---------- */
+#game[data-screen="play"] { touch-action: none; user-select: none; -webkit-user-select: none; }
+#touchControls {
+  --stick: clamp(112px, 34vw, 160px);
+  --knob: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  width: min(100% - 2 * var(--s-3), 520px);
+  margin: var(--s-2) 0 var(--s-4);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#touchControls .stick {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--stick);
+  height: var(--stick);
+  border: 1px solid var(--line-hi);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--surface-hi) 0 30%, var(--surface) 70%);
+  box-shadow: inset 0 0 0 calc(var(--stick) / 2 - var(--knob) / 2 - 1px) rgb(6 9 13 / 0.25);
+  touch-action: none;
+}
+#touchControls .stick::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: calc(-1 * var(--s-4));
+  color: var(--text-mute);
+  font: 700 var(--fs-xs)/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#touchControls .knob {
+  width: var(--knob);
+  height: var(--knob);
+  border: 2px solid var(--cyan);
+  border-radius: 50%;
+  background: var(--cyan-soft);
+  box-shadow: var(--glow-cyan);
+  pointer-events: none;
+}
+#touchControls .stick[data-stick="aim"] .knob { border-color: var(--amber); background: var(--amber-soft); box-shadow: var(--glow-amber); }
+#touchControls .stick[data-active="true"] { border-color: var(--cyan); }
+#touchDefuse {
+  display: grid;
+  place-items: center;
+  min-width: 72px;
+  min-height: 72px;
+  padding: 0 var(--s-3);
+  border: 2px solid var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber);
+  font: 700 var(--fs-sm)/1 var(--font-mono);
+  letter-spacing: 0.12em;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  touch-action: none;
+  cursor: pointer;
+}
+#touchDefuse[data-held="true"] { background: var(--amber); color: var(--on-accent); box-shadow: var(--glow-amber); }
+
 /* ---------- replay bar ---------- */
 #replayBar {
   display: flex;
@@ -544,6 +613,34 @@ kbd {
 }
 @media (min-width: 1600px) {
   :root { font-size: 18px; }
+}
+/* Landscape phones: map fills the height, controls float translucent in the bottom corners.
+   Touch mode only (#game[data-touch="1"]), so short desktop windows keep the regular layout. */
+@media (orientation: landscape) and (max-height: 540px) {
+  #game[data-touch="1"][data-screen="play"] { height: 100vh; height: 100dvh; overflow: hidden; }
+  #game[data-touch="1"][data-screen="play"] #hud { grid-template-columns: minmax(0, 1.6fr) repeat(4, minmax(0, 1fr)); margin: var(--s-1) 0; }
+  #game[data-touch="1"][data-screen="play"] .hud-round { grid-column: auto; }
+  #game[data-touch="1"][data-screen="play"] #hud > * { padding: var(--s-1) var(--s-2); }
+  #game[data-touch="1"][data-screen="play"] #hudLevel { font-size: var(--fs-md); }
+  #game[data-touch="1"][data-screen="play"] #hudGoal { display: none; }
+  #game[data-touch="1"][data-screen="play"] .stat b { font-size: var(--fs-md); }
+  #game[data-touch="1"][data-screen="play"] #gameStage { flex: 1 1 0; min-height: 0; display: flex; justify-content: center; padding-bottom: var(--s-1); }
+  #game[data-touch="1"][data-screen="play"] #gameStage canvas { width: auto !important; max-height: 100%; }
+  #game[data-touch="1"] #touchControls {
+    --stick: clamp(112px, 34vh, 150px);
+    position: fixed;
+    inset: auto 0 0 0;
+    z-index: 3;
+    width: auto;
+    margin: 0;
+    padding: 0 var(--s-4) var(--s-5);
+    align-items: flex-end;
+    pointer-events: none;
+  }
+  #game[data-touch="1"] #touchControls .stick, #game[data-touch="1"] #touchDefuse { pointer-events: auto; }
+  #game[data-touch="1"] #touchControls .stick { background: rgb(15 23 32 / 0.45); box-shadow: none; backdrop-filter: blur(2px); }
+  #game[data-touch="1"] #touchDefuse { position: fixed; right: calc(var(--s-4) + var(--stick) + var(--s-4)); bottom: var(--s-5); }
+  #game[data-touch="1"] #touchDefuse:not([data-held="true"]) { background: rgb(255 184 77 / 0.22); }
 }
 
 @media (prefers-reduced-motion: reduce) {
