@@ -6,6 +6,28 @@ import { initState, simTimeAt, step, type Command, type SimState } from "../sim/
 import { warpUV } from "../sim/warp";
 import type { World } from "../sim/world";
 
+/** Gap between the two replay panels (px). */
+export const PANEL_GAP = 16;
+/** Vertical px per replay panel besides its map square (header strip + breathing room). */
+export const PANEL_CHROME = 40;
+
+export type ReplayLayout = { readonly layout: "row" | "column"; readonly width: number; readonly height: number };
+
+/**
+ * Largest canvas for the two replay panels inside `availW × availH` (px): side by side or
+ * stacked, whichever gives the bigger map square (min 120 px). Returns the canvas size.
+ */
+export function replayLayout(availW: number, availH: number): ReplayLayout {
+  const row = Math.floor(Math.min((availW - PANEL_GAP) / 2, availH - PANEL_CHROME));
+  const col = Math.floor(Math.min(availW, (availH - PANEL_GAP) / 2 - PANEL_CHROME));
+  if (col > row) {
+    const p = Math.max(120, col);
+    return { layout: "column", width: p, height: 2 * (p + PANEL_CHROME) + PANEL_GAP };
+  }
+  const p = Math.max(120, row);
+  return { layout: "row", width: 2 * p + PANEL_GAP, height: p + PANEL_CHROME };
+}
+
 /**
  * Every state of the player's round, index = tick (states[0] = initState). Computed once so
  * scrubbing is an O(1) lookup. Same rules as `replay()`: commands in tick order, one per tick,

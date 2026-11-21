@@ -2,6 +2,7 @@ import { Application, Container, Graphics, Text } from "pixi.js";
 import { SYNTHETIC_1V3 } from "../level/fixtures/synthetic-1v3";
 import { loadLevel } from "../level/loader";
 import type { Level, MapName } from "../level/types";
+import { renderResolution } from "../game/input";
 import { mapFor } from "../maps";
 import { drawMap } from "../render/mapView";
 import type { DensityRaster } from "../calib/metrics";
@@ -118,7 +119,14 @@ export async function startDebugPage(): Promise<void> {
   const world = buildWorld(mapFor(level.map), level);
 
   const app = new Application();
-  await app.init({ width: VIEW_PX, height: VIEW_PX, background: 0x14110f, antialias: true });
+  await app.init({
+    width: VIEW_PX,
+    height: VIEW_PX,
+    background: 0x14110f,
+    antialias: true,
+    resolution: renderResolution(window.devicePixelRatio),
+    autoDensity: true,
+  });
   el<HTMLDivElement>("stage").appendChild(app.canvas);
 
   const root = new Container();

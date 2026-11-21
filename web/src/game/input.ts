@@ -26,6 +26,29 @@ export function mapInput(raw: RawControls, scale: number): Input {
   };
 }
 
+/** Highest renderer resolution used on HiDPI screens (sharpness vs. fill-rate on phones). */
+export const MAX_RESOLUTION = 2;
+
+/** Pixi renderer resolution for a device pixel ratio: dpr capped to [1, MAX_RESOLUTION]. */
+export function renderResolution(dpr: number | undefined): number {
+  return Number.isFinite(dpr) && dpr! > 0 ? Math.min(Math.max(dpr!, 1), MAX_RESOLUTION) : 1;
+}
+
+/**
+ * Pointer client px → logical canvas px (the units the stage is laid out in). Uses the logical
+ * width (`app.screen.width`), never `canvas.width`, which is logical × resolution on HiDPI screens;
+ * CSS may also shrink the canvas on narrow screens.
+ */
+export function clientToCanvas(
+  clientX: number,
+  clientY: number,
+  rect: { readonly left: number; readonly top: number; readonly width: number },
+  logicalWidth: number,
+): Vec2 {
+  const k = rect.width > 0 ? logicalWidth / rect.width : 1;
+  return { x: (clientX - rect.left) * k, y: (clientY - rect.top) * k };
+}
+
 /**
  * Swallow page scrolling keys only while playing or watching a replay (where Space/arrows are
  * replay shortcuts), so menus and the initials field behave normally.

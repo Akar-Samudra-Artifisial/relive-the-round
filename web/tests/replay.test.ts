@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildYouTimeline, proFrameAt, replaySpan, tickAtTime, timeOfTick, youStateAt } from "../src/game/replayModel";
+import { buildYouTimeline, proFrameAt, replayLayout, replaySpan, tickAtTime, timeOfTick, youStateAt } from "../src/game/replayModel";
 import { Session } from "../src/game/session";
 import { SYNTHETIC_1V3 } from "../src/level/fixtures/synthetic-1v3";
 import { KILN } from "../src/maps/kiln";
@@ -72,5 +72,25 @@ describe("pro frame", () => {
     expect(proFrameAt(world, level, diedT + 5).enemies.some((e) => e.id === first.id)).toBe(false);
     expect(at.kills.map((k) => k.victim)).toEqual(level.kills.filter((k) => k.t <= diedT).map((k) => k.victim));
     for (const k of at.kills) expect(Number.isFinite(k.at.x) && Number.isFinite(k.at.y)).toBe(true);
+  });
+});
+
+describe("replayLayout", () => {
+  it("puts the panels side by side on landscape screens and fits the area", () => {
+    for (const [w, h] of [[1176, 540], [1896, 940]] as const) {
+      const fit = replayLayout(w, h);
+      expect(fit.layout).toBe("row");
+      expect(fit.width).toBeLessThanOrEqual(w);
+      expect(fit.height).toBeLessThanOrEqual(h);
+    }
+  });
+
+  it("stacks the panels on portrait phones when that gives a bigger map", () => {
+    const fit = replayLayout(366, 600);
+    expect(fit.layout).toBe("column");
+    expect(fit.width).toBeLessThanOrEqual(366);
+    expect(fit.height).toBeLessThanOrEqual(600);
+    // Stacked map square (= canvas width) beats the side-by-side one, (366 - 16) / 2.
+    expect(fit.width).toBeGreaterThan((366 - 16) / 2);
   });
 });
