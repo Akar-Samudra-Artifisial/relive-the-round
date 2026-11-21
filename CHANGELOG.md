@@ -15,6 +15,7 @@ Semua perubahan penting dicatat di sini. Format mengikuti Keep a Changelog, vers
 - Favicon SVG orisinal (`web/public/favicon.svg`), sehingga `/favicon.ico` tidak lagi 404 di browser.
 - Catatan orisinalitas peta Cistern di `README.md`: geometri orisinal, layout di-warp dari densitas posisi pemain agregat, tanpa art/geometri peta Riot.
 - Link previews: Open Graph and Twitter `summary_large_image` meta tags in `web/index.html` plus an original 1200x630 card `web/public/og-image.png` (drawn by `pnpm -C web og-image`, no dependencies). Challenge links (`/#c=…`) share the same card because the fragment never reaches crawlers; the CSP is unchanged.
+- `AI_SHOWCASE.md` and `docs/ai-showcase/`: the Junie (WebStorm) workflow, with five sessions exported from the local Junie logs (prompt, plan, commands and results, human corrections, commit). The Tooling section in `docs/devpost-submission.md` now names the JetBrains tools used.
 - Booth kiosk mode (`?kiosk=1`, optional `&idle=<s>`, 10–600 s, default 60 s): after initials are saved the score screen returns to the level select after 15 s without input (hard cap 60 s); an untouched level select switches to an attract loop (featured rounds + top scores) whose first key/click only dismisses it; "Download card" is hidden and `#c=` challenge links are ignored (the QR stays); the operator can clear the local leaderboard with Ctrl+Shift+Alt+R or 5 quick taps in the top-left corner, followed by an in-page confirm. Normal mode and gameplay rules are unchanged.
 
 ### Changed

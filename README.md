@@ -6,6 +6,8 @@ while 2-3 enemies move on rails derived from GRID data plus a bot state machine.
 
 **Play it:** https://relive-the-round.vercel.app
 
+**Built with Junie in WebStorm:** see [`AI_SHOWCASE.md`](AI_SHOWCASE.md) for the documented Junie sessions.
+
 ## Layout
 
 - `etl/` - Python (uv) pipeline: reads GRID feeds, finds clutches, builds levels.

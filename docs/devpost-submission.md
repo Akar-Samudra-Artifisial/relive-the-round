@@ -64,8 +64,9 @@ them how the pro solved it. Short, readable and easy to share is what makes it w
   `dist/`: no calibration data, no raw GRID UUIDs, no e-mail addresses, no local paths, no debug page.
   Vercel serves a prebuilt output (never built from Git), with a strict CSP (`script-src 'self'`,
   no `unsafe-eval`, `frame-ancestors 'none'`).
-- **Tooling:** TODO(user): which JetBrains IDE(s) and/or Junie were actually used, and for what
-  (see the Tooling section). Do not submit without at least one JetBrains tool or Junie.
+- **Tooling:** WebStorm 2026.3 with Junie (JetBrains' coding agent) planned, implemented and tested
+  kiosk mode, level schema v2, link previews and touch controls (see the Tooling section and
+  `AI_SHOWCASE.md`).
 
 ## Challenges we ran into
 
@@ -86,7 +87,7 @@ them how the pro solved it. Short, readable and easy to share is what makes it w
 - 6 playable rounds, each one a real clutch that a pro won, on two original maps.
 - The two-panel "you vs pro" replay: the moment a player sees where their route differs from the pro's.
 - An event loop that works end to end: attract → play → score → replay → card → phone challenge.
-- 150 automated tests (107 web, 43 ETL) and a public build that fails if any data it should not
+- 202 automated tests (151 web, 51 ETL) and a public build that fails if any data it should not
   ship ends up in `dist/`.
 
 ## What we learned
@@ -107,12 +108,12 @@ them how the pro solved it. Short, readable and easy to share is what makes it w
 ## Built with
 
 python, uv, pytest, typescript, vite, pixi.js, vitest, ajv, qrcode-generator, json-schema, vercel,
-grid, TODO(user): JetBrains tools actually used (e.g. the IDE name, junie)
+grid, webstorm, junie
 
 ## Try it out
 
 - Demo: https://relive-the-round.vercel.app
-- Repository: TODO(user): public GitHub URL
+- Repository: https://github.com/Akar-Samudra-Artifisial/relive-the-round
 - Video: TODO(user): public YouTube URL (< 3 min)
 
 ## Testing instructions
@@ -130,10 +131,10 @@ Judges, no install needed:
 From source (code only; the licensed data is not in the repo):
 
 ```sh
-pnpm -C web install && pnpm -C web test     # 107 tests
+pnpm -C web install && pnpm -C web test     # 151 tests
 pnpm -C web dev                              # http://localhost:5177; without the data the
                                              # rounds use a synthetic fixture level
-cd etl && uv run pytest                      # 43 tests
+cd etl && uv run pytest                      # 51 tests
 ```
 
 Rebuilding the real levels needs the hackathon GRID data: set `STL_DATA_DIR` and see `README.md` (ETL)
@@ -155,9 +156,17 @@ and `docs/deploy.md`.
 
 ## Tooling
 
-- TODO(user): JetBrains IDE(s) used (name + version) and what they were used for.
-- TODO(user): Junie / JetBrains Air: what tasks they did, if used. Only claim what really happened.
-- TODO(user): other AI assistants used during development, if any, and where that is documented.
+- **JetBrains IDE:** WebStorm 2026.3 (build WS-263.7307.202) for the TypeScript client and the Python ETL.
+- **Junie** (plugin 263.2144.30, agent 4100.10.0, model `claude-opus-5-5`) did 5 documented sessions:
+  agent guidelines (`.junie/guidelines.md`), booth kiosk mode, original map ids + level schema v2,
+  link previews, and twin-stick touch controls.
+- Workflow: guidelines → plan in Plan mode (`.junie/plans/*.md`) → human answers/approval → implement
+  with tests → `pnpm test`, `tsc`, `pytest`, `build:public` → human review → Junie follow-up fixes.
+  The web suite went from 107 to 151 tests across these sessions.
+- Other AI assistants: prompts were drafted, and reviews done, with help from an AI assistant outside
+  JetBrains. Only Junie's work is claimed for the JetBrains/Junie bonus.
+- Evidence: [`AI_SHOWCASE.md`](https://github.com/Akar-Samudra-Artifisial/relive-the-round/blob/main/AI_SHOWCASE.md)
+  and the exported session logs in `docs/ai-showcase/`; commits `0d8ac73`, `420dbdc`, `4081eb6`, `680d58d`.
 - Runtime/tooling facts: uv (Python), pnpm + Vite + Vitest (web), TypeScript, Vercel CLI (prebuilt deploy).
 
 ## Data & IP compliance
@@ -179,13 +188,13 @@ and `docs/deploy.md`.
 | Category selected (Category 3: Event Mini Game) | Draft ready |
 | Project name, tagline, description | Draft ready (this file) |
 | Methodology write-up | Draft ready |
-| Tooling explanation (≥ 1 JetBrains tool / Junie) | **TODO(user)** (blocking) |
+| Tooling explanation (≥ 1 JetBrains tool / Junie) | Done: WebStorm + Junie (Tooling section, `AI_SHOWCASE.md`) |
 | Testing instructions | Draft ready |
 | Demo link | Done: https://relive-the-round.vercel.app |
-| Public repo with OSS license | **TODO(user)**: repo URL. License: MIT in `LICENSE` (holder "Relive the Round contributors"); confirm the repo is public and history has no data |
+| Public repo with OSS license | Done: https://github.com/Akar-Samudra-Artifisial/relive-the-round (public, GitHub detects MIT; history scanned, no data files) |
 | Video < 3 min, public on YouTube, shows the project running | **TODO(user)**: record from `docs/demo-video-script.md`, upload, paste URL |
 | Team members added on Devpost | **TODO(user)** |
-| `AI_SHOWCASE.md` (optional bonus, JetBrains/Junie/Air entries only) | Pending user decision |
+| `AI_SHOWCASE.md` (optional bonus, JetBrains/Junie/Air entries only) | Done: `AI_SHOWCASE.md` + `docs/ai-showcase/` |
 | Organizer OK for hosting derived level files | **TODO(user)** |
 
 ### IP risk check (grep of `web/src` and `web/index.html`, 2026-11-21)
