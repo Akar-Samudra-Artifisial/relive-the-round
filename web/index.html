@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Relive the Round</title>
     <meta name="description" content="Real pro esports clutch rounds rebuilt as a 2D mini game. Take over the last player standing, then compare your run with the real round." />
-    <meta name="theme-color" content="#14110f" />
+    <meta name="theme-color" content="#06090d" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- Link previews. Crawlers never see the #c=... fragment, so challenge links share this card. -->
     <meta property="og:type" content="website" />
@@ -23,61 +23,6 @@
     <meta name="twitter:description" content="Real 1vN pro clutch rounds. You are the last one standing. Play the round, then beat the pro - or beat my score." />
     <meta name="twitter:image" content="https://relive-the-round.vercel.app/og-image.png" />
     <meta name="twitter:image:alt" content="Relive the Round: a crosshair logo, the title and an abstract top-down floor plan with enemy paths." />
-    <style>
-      body { margin: 0; background: #14110f; color: #e8e1d6; font: 13px/1.4 system-ui, sans-serif; }
-      [hidden] { display: none !important; }
-      #controls { display: flex; gap: 12px; align-items: center; padding: 8px 12px; flex-wrap: wrap; }
-      #time { width: 360px; }
-      #error { color: #ff7a6b; padding: 0 12px; white-space: pre-wrap; }
-      #stage { padding: 0 12px 12px; }
-
-      #game { position: relative; display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
-      #hud { display: flex; gap: 20px; padding: 8px 12px; font-size: 16px; align-items: baseline; flex-wrap: wrap; justify-content: center; }
-      #hud b { color: #ffd479; }
-      #hudGoal { color: #a89c8c; font-size: 13px; }
-      #gameStage { padding: 0 12px 12px; }
-      .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: 14px; background: rgba(20, 17, 15, 0.94); text-align: center; overflow-y: auto; padding: 16px 0; box-sizing: border-box; }
-      .overlay h1 { font-size: 40px; margin: 0; color: #ffd479; }
-      .overlay h2 { font-size: 34px; margin: 0; color: #ffd479; }
-      #game button { background: #2b2420; color: #e8e1d6; border: 1px solid #8a7a66; border-radius: 6px; padding: 10px 16px; font: inherit; font-size: 15px; cursor: pointer; }
-      #game button:hover { border-color: #ffd479; }
-      #game button:disabled { opacity: 0.55; cursor: default; }
-      #game button:focus-visible, #game input:focus-visible { outline: 2px solid #ffd479; outline-offset: 2px; }
-      #game button[aria-pressed="true"] { background: #ffd479; color: #14110f; border-color: #ffd479; }
-      #shareRow { display: flex; gap: 16px; align-items: center; justify-content: center; flex-wrap: wrap; }
-      #shareRow .actions { display: flex; flex-direction: column; gap: 8px; }
-      #resultQr { width: 112px; height: 112px; image-rendering: pixelated; border-radius: 4px; }
-      #replayBar { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 0 12px 12px; font-size: 15px; }
-      #replaySlider { width: min(360px, 60vw); accent-color: #ffd479; }
-      #replayTime { min-width: 9ch; font-variant-numeric: tabular-nums; }
-      #challenge { border: 1px solid #ffd479; border-radius: 8px; padding: 14px 20px; display: flex; flex-direction: column; gap: 6px; align-items: center; max-width: 90vw; }
-      #challenge h2 { font-size: 26px; }
-      #challenge ul { list-style: none; padding: 0; margin: 0; font-size: 16px; }
-      #resultChallenge { color: #ffd479; font-size: 16px; margin: 0; }
-      #levelButtons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-      #levelButtons button { display: flex; flex-direction: column; gap: 4px; min-width: 220px; }
-      #levelButtons span, .dim { color: #a89c8c; font-size: 12px; }
-      #board { list-style: none; padding: 0; margin: 0; font-size: 15px; }
-      #resultRows th { text-align: left; padding: 2px 16px 2px 0; color: #a89c8c; font-weight: normal; }
-      #resultRows td { padding: 2px 16px; font-size: 16px; }
-      #initials { width: 5ch; font: inherit; font-size: 22px; text-transform: uppercase; text-align: center; background: #2b2420; color: #ffd479; border: 1px solid #8a7a66; border-radius: 6px; }
-      #fps { position: fixed; right: 8px; bottom: 6px; color: #6bff95; font-size: 12px; }
-      #idle { cursor: pointer; gap: 22px; }
-      #idleSlide { display: flex; flex-direction: column; gap: 6px; min-height: 64px; max-width: 80vw; }
-      #idleSlide b { font-size: 24px; color: #e8e1d6; }
-      #idleSlide span { color: #a89c8c; font-size: 15px; }
-      #idleBoard { list-style: none; padding: 0; margin: 0; font-size: 17px; }
-      #idlePrompt { font-size: 20px; color: #ffd479; animation: idle-pulse 1.6s ease-in-out infinite; }
-      @keyframes idle-pulse { 50% { opacity: 0.35; } }
-      @media (prefers-reduced-motion: reduce) { #idlePrompt { animation: none; } }
-      #kioskReset { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 10; display: flex; flex-direction: column; gap: 12px; align-items: center; padding: 20px 28px; background: #2b2420; border: 1px solid #ffd479; border-radius: 8px; box-shadow: 0 8px 32px #000; }
-      #kioskReset p { margin: 0; font-size: 18px; }
-      #kioskReset .actions { display: flex; gap: 12px; }
-      #countdown { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; color: #ffd479; text-shadow: 0 2px 8px #000; }
-      #countdown[hidden] { display: none; }
-      #countdownNum { font-size: 120px; font-weight: bold; }
-      #countdownHint { font-size: 18px; color: #e8e1d6; }
-    </style>
   </head>
   <body>
     <div id="debug" hidden>
@@ -94,19 +39,31 @@
       <div id="stage"></div>
     </div>
 
+    <svg class="svg-defs" aria-hidden="true" focusable="false">
+      <symbol id="rtr-mark" viewBox="0 0 64 64">
+        <path d="M14 4H50L60 14V50L50 60H14L4 50V14Z" fill="#06090d" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" opacity="0.9"/>
+        <path d="M23 21.3A14 14 0 1 0 41 21.3" fill="none" stroke="#3ee6ff" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M37.9 18.7L43.3 18.6L38.8 24Z" fill="#3ee6ff" stroke="#3ee6ff" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M32 11V22M32 42V53M11 32H22M42 32H53" stroke="#e4eef3" stroke-width="2.5" stroke-linecap="square"/>
+        <circle cx="32" cy="32" r="3.5" fill="#ffb84d"/>
+      </symbol>
+    </svg>
+
     <div id="game" hidden>
       <div id="hud" hidden>
-        <span id="hudLevel"></span>
-        <span>HP <b id="hudHp"></b></span>
-        <span>Enemies <b id="hudEnemies"></b></span>
-        <span>Clock <b id="hudClock"></b></span>
-        <span>Spike <b id="hudSpike"></b></span>
-        <span id="hudGoal"></span>
+        <div class="hud-round">
+          <span id="hudLevel"></span>
+          <span id="hudGoal"></span>
+        </div>
+        <span class="stat"><span class="label">HP</span> <b id="hudHp"></b></span>
+        <span class="stat"><span class="label">Enemies</span> <b id="hudEnemies"></b></span>
+        <span class="stat"><span class="label">Clock</span> <b id="hudClock"></b></span>
+        <span class="stat"><span class="label">Spike</span> <b id="hudSpike"></b></span>
       </div>
       <div id="gameStage"></div>
-      <div id="replayBar" role="group" aria-label="Replay controls" hidden>
-        <button id="replayToggle" type="button">Pause</button>
-        <span role="group" aria-label="Playback speed">
+      <div id="replayBar" class="panel" role="group" aria-label="Replay controls" hidden>
+        <button id="replayToggle" class="primary" type="button">Pause</button>
+        <span class="speed" role="group" aria-label="Playback speed">
           <button type="button" data-speed="1" aria-pressed="true">1×</button>
           <button type="button" data-speed="2" aria-pressed="false">2×</button>
           <button type="button" data-speed="4" aria-pressed="false">4×</button>
@@ -114,35 +71,66 @@
         <input id="replaySlider" type="range" min="0" max="1" step="0.1" value="0" aria-label="Replay position (seconds)" />
         <span id="replayTime" aria-hidden="true"></span>
         <button id="replayExit" type="button">Back to score (Esc)</button>
-        <span class="dim">Space play/pause · 1 2 4 speed · ← → seek</span>
+        <span class="dim keys"><kbd>Space</kbd> play/pause · <kbd>1</kbd> <kbd>2</kbd> <kbd>4</kbd> speed · <kbd>←</kbd> <kbd>→</kbd> seek</span>
       </div>
 
       <div id="attract" class="overlay" hidden>
-        <section id="challenge" aria-labelledby="challengeTitle" hidden>
-          <h2 id="challengeTitle">You've been challenged</h2>
-          <p id="challengeLevel" class="dim"></p>
-          <ul id="challengeStats"></ul>
-          <button id="beatThis" type="button">Beat this (Enter)</button>
-        </section>
-        <h1>Could you have clutched it?</h1>
-        <p>Real pro clutch rounds. You are the last one standing. Pick a round:</p>
-        <div id="levelButtons"></div>
-        <button id="randomLevel" type="button">Random round (Enter)</button>
-        <p class="dim">WASD move · mouse aim · click shoot · hold E to defuse · Esc quit</p>
-        <h3>Top scores</h3>
-        <ol id="board"></ol>
+        <div class="menu">
+          <div class="brand">
+            <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#rtr-mark" /></svg>
+            <span class="wordmark"><span>Relive</span><span>the Round</span></span>
+          </div>
+          <section id="challenge" class="panel" aria-labelledby="challengeTitle" hidden>
+            <p class="eyebrow">Incoming challenge</p>
+            <h2 id="challengeTitle">You've been challenged</h2>
+            <p id="challengeLevel" class="dim"></p>
+            <ul id="challengeStats"></ul>
+            <button id="beatThis" class="primary" type="button">Beat this (Enter)</button>
+          </section>
+          <div class="menu-intro">
+            <p class="eyebrow">Pro clutch rounds · 1vN</p>
+            <h1>Could you have clutched it?</h1>
+            <p class="lede">Real pro clutch rounds. <strong>You are the last one standing.</strong> Pick a round:</p>
+          </div>
+          <div class="menu-levels">
+            <div class="panel-head"><span class="label">Select round · or press its number</span></div>
+            <div id="levelButtons"></div>
+          </div>
+          <div class="menu-side">
+            <button id="randomLevel" class="primary" type="button">Random round <span class="hint">Enter</span></button>
+            <div class="panel">
+              <div class="panel-head"><span class="label">Controls</span></div>
+              <p class="keys">
+                <span><kbd>WASD</kbd> move</span><span><kbd>Mouse</kbd> aim</span><span><kbd>Click</kbd> shoot</span><span><kbd>E</kbd> hold to defuse</span><span><kbd>Esc</kbd> quit</span>
+              </p>
+            </div>
+            <div class="panel scores">
+              <div class="panel-head"><h3>Top scores</h3></div>
+              <ol id="board" class="board"></ol>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div id="idle" class="overlay" hidden>
-        <h1>Could you have clutched it?</h1>
-        <p>Real pro clutch rounds. You are the last one standing.</p>
-        <div id="idleSlide"><b id="idleSlideTitle"></b><span id="idleSlideBlurb"></span></div>
-        <h3>Top scores</h3>
-        <ol id="idleBoard"></ol>
-        <p id="idlePrompt">Press any key or click to play</p>
+        <div class="idle">
+          <div class="brand">
+            <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false"><use href="#rtr-mark" /></svg>
+            <span class="wordmark"><span>Relive</span><span>the Round</span></span>
+          </div>
+          <h1>Could you have clutched it?</h1>
+          <p class="lede">Real pro clutch rounds. You are the last one standing.</p>
+          <div id="idleSlide" class="panel"><b id="idleSlideTitle"></b><span id="idleSlideBlurb"></span></div>
+          <div class="panel scores">
+            <div class="panel-head"><h3>Top scores</h3></div>
+            <ol id="idleBoard" class="board"></ol>
+          </div>
+          <p id="idlePrompt">Press any key or click to play</p>
+        </div>
       </div>
 
-      <div id="kioskReset" role="dialog" aria-modal="true" aria-labelledby="kioskResetTitle" hidden>
+      <div id="kioskReset" class="panel" role="dialog" aria-modal="true" aria-labelledby="kioskResetTitle" hidden>
+        <p class="eyebrow">Operator</p>
         <p id="kioskResetTitle">Clear all local scores?</p>
         <div class="actions">
           <button id="kioskResetClear" type="button">Clear</button>
@@ -152,31 +140,43 @@
       </div>
 
       <div id="scoreScreen" class="overlay" hidden>
-        <h2 id="resultTitle"></h2>
-        <p id="resultReason"></p>
-        <table>
-          <thead><tr><th></th><td>You</td><td>Pro</td></tr></thead>
-          <tbody id="resultRows"></tbody>
-        </table>
-        <p id="resultPro"></p>
-        <p>Score <b id="resultPoints"></b></p>
-        <p id="resultChallenge" hidden></p>
-        <div id="shareRow">
-          <canvas id="resultQr" width="112" height="112" role="img" aria-label="QR code: challenge link to this round"></canvas>
-          <div class="actions">
-            <button id="watchReplay" type="button">Watch replay</button>
-            <button id="downloadCard" type="button">Download card</button>
-            <span class="dim">Scan to challenge a friend</span>
+        <div class="score panel">
+          <div class="score-head">
+            <p class="eyebrow">Round result</p>
+            <h2 id="resultTitle"></h2>
+            <p id="resultReason"></p>
+          </div>
+          <p class="score-points"><span class="label">Score</span> <b id="resultPoints"></b></p>
+          <table class="score-table">
+            <thead><tr><td></td><th scope="col">You</th><th scope="col">Pro</th></tr></thead>
+            <tbody id="resultRows"></tbody>
+          </table>
+          <div class="score-notes">
+            <p id="resultPro"></p>
+            <p id="resultChallenge" hidden></p>
+          </div>
+          <div id="shareRow">
+            <canvas id="resultQr" width="112" height="112" role="img" aria-label="QR code: challenge link to this round"></canvas>
+            <div class="actions">
+              <button id="watchReplay" type="button">Watch replay</button>
+              <button id="downloadCard" type="button">Download card</button>
+              <span class="dim">Scan to challenge a friend</span>
+              <p id="shareMsg" class="dim" role="status"></p>
+            </div>
+          </div>
+          <div class="score-save">
+            <label class="label" for="initials">Your initials</label>
+            <div class="save-row">
+              <input id="initials" maxlength="3" placeholder="AAA" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+              <button id="saveScore" class="primary" type="button">Save</button>
+            </div>
+            <p id="initialsMsg" class="dim" role="status">Type 3 letters and press Enter to save · Enter with an empty box skips</p>
+          </div>
+          <div class="score-foot">
+            <p class="dim">Back to start in <span id="returnIn"></span> s</p>
+            <button id="nextPlayer" class="ghost" type="button">Next player (skip)</button>
           </div>
         </div>
-        <p id="shareMsg" class="dim" role="status"></p>
-        <p>
-          <input id="initials" maxlength="3" placeholder="AAA" autocomplete="off" aria-label="Your initials" />
-          <button id="saveScore" type="button">Save</button>
-        </p>
-        <p id="initialsMsg" class="dim" role="status">Type 3 letters and press Enter to save · Enter with an empty box skips</p>
-        <button id="nextPlayer" type="button">Next player (skip)</button>
-        <p class="dim">Back to start in <span id="returnIn"></span> s</p>
       </div>
       <div id="countdown" hidden>
         <div id="countdownNum"></div>

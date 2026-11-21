@@ -1,18 +1,21 @@
 import { Application, Container, Graphics } from "pixi.js";
 import { mapFor } from "../maps";
 import { drawMap } from "../render/mapView";
-import { DEFUSE_RADIUS, DEFUSE_S, TICK_HZ } from "../sim/constants";
+import { drawDown, drawEnemy, drawPlayer, drawSpike, drawTracer } from "../render/actors";
+import { DEFUSE_S, TICK_HZ } from "../sim/constants";
 import { segmentClear, type Vec2 } from "../sim/geom";
+import { ensureFonts, prefersReducedMotion } from "../ui/fonts";
+import { THEME_NUM } from "../ui/theme";
 import { clockAt, NO_INPUT, simTimeAt, type Input, type ShotEvent, type SimState } from "../sim/sim";
 import { buildWorld, type World } from "../sim/world";
 import { createAutopilot, type Autopilot } from "./autopilot";
 import { qrMatrix, renderCard, type QrMatrix } from "./cardImage";
 import { challengeLines, landingAction, replayKeyAction } from "./challengeLanding";
-import { blocksDefault, mapInput, type Screen } from "./input";
+import { blocksDefault, clientToCanvas, mapInput, renderResolution, type Screen } from "./input";
 import { attractSlide, CornerTaps, isResetChord, kioskScoreDeadline, parseKiosk, RESET_CONFIRM_S } from "./kiosk";
 import { addEntry, clearEntries, normalizeInitials, topEntries, validInitials } from "./leaderboard";
 import { FEATURED, loadFeatured, type LoadedLevel } from "./levels";
-import { buildYouTimeline } from "./replayModel";
+import { buildYouTimeline, replayLayout } from "./replayModel";
 import { ReplayView, type ReplaySpeed } from "./replayView";
 import { scoreRound, type ScoreCard } from "./score";
 import { Session } from "./session";
@@ -27,9 +30,11 @@ import {
   shouldAbortPlay,
 } from "./timing";
 
-const ENEMY_COLOR = 0xff6b5a;
-const PLAYER_COLOR = 0x5ad1ff;
 const TRACER_MS = 120;
+/** Matches the #gameStage / #replayBar spacing (--s-3) in theme.css. */
+const STAGE_PAD = 12;
+/** HUD turns the HP readout red at or below this value. */
+const LOW_HP = 30;
 const INITIALS_HINT = "Type 3 letters and press Enter to save · Enter with an empty box skips";
 
 function el<T extends HTMLElement>(id: string): T {
@@ -74,9 +79,12 @@ const REASON_TEXT: Record<ScoreCard["reason"], string> = {
 class Controls {
   private keys = new Set<string>();
   private aimPx: Vec2 = { x: 0, y: 0 };
+  /** False until the pointer has moved/pressed on the canvas: (0,0) is not a real aim yet. */
+  hasAimed = false;
   private firing = false;
 
-  constructor(canvas: HTMLCanvasElement, screen: () => Screen) {
+  /** `logicalWidth`: current stage width in logical px (app.screen.width), not canvas.width. */
+  constructor(canvas: HTMLCanvasElement, screen: () => Screen, logicalWidth: () => number) {
     addEventListener("keydown", (e) => {
       this.keys.add(e.code);
       // In the replay a focused control (speed button, slider) keeps its native Space/arrow behaviour.
@@ -87,14 +95,16 @@ class Controls {
       this.keys.clear();
       this.firing = false;
     });
+    // CSS may shrink the canvas and HiDPI renders it at resolution × size: map to logical px.
+    const toCanvas = (e: PointerEvent): Vec2 => clientToCanvas(e.clientX, e.clientY, canvas.getBoundingClientRect(), logicalWidth());
     canvas.addEventListener("pointermove", (e) => {
-      const r = canvas.getBoundingClientRect();
-      this.aimPx = { x: e.clientX - r.left, y: e.clientY - r.top };
+      this.aimPx = toCanvas(e);
+      this.hasAimed = true;
     });
     canvas.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
-      const r = canvas.getBoundingClientRect();
-      this.aimPx = { x: e.clientX - r.left, y: e.clientY - r.top };
+      this.aimPx = toCanvas(e);
+      this.hasAimed = true;
       this.firing = true;
     });
     addEventListener("pointerup", () => (this.firing = false));
@@ -128,10 +138,21 @@ export async function startGame(): Promise<void> {
     }
   }
 
+  // Pixi Text (site letters, replay headers) must not rasterise with a fallback font.
+  await ensureFonts();
   const stageEl = el<HTMLDivElement>("gameStage");
-  const size = Math.max(480, Math.min(innerWidth - 24, innerHeight - 64));
+  // Leaves room for the HUD strip above the canvas; CSS scales the canvas down on narrow screens.
+  const size = Math.max(480, Math.min(innerWidth - 24, innerHeight - 104));
   const app = new Application();
-  await app.init({ width: size, height: size, background: 0x14110f, antialias: true });
+  // HiDPI: render at devicePixelRatio (capped at 2) with the same CSS size (autoDensity).
+  await app.init({
+    width: size,
+    height: size,
+    background: THEME_NUM.bg,
+    antialias: true,
+    resolution: renderResolution(window.devicePixelRatio),
+    autoDensity: true,
+  });
   stageEl.appendChild(app.canvas);
 
   const root = new Container();
@@ -147,7 +168,7 @@ export async function startGame(): Promise<void> {
   const countdownEl = el<HTMLDivElement>("countdown");
 
   let screen: Screen = "attract";
-  const controls = new Controls(app.canvas, () => screen);
+  const controls = new Controls(app.canvas, () => screen, () => app.screen.width);
   let session: Session | null = null;
   let pilot: Autopilot | null = null;
   let playStartedMs = 0;
@@ -176,6 +197,7 @@ export async function startGame(): Promise<void> {
   let shareQr: QrMatrix | null = null;
 
   const replayBar = el<HTMLDivElement>("replayBar");
+  const gameEl = el<HTMLDivElement>("game");
   const replaySlider = el<HTMLInputElement>("replaySlider");
   const replayToggle = el<HTMLButtonElement>("replayToggle");
   const speedButtons = [...replayBar.querySelectorAll<HTMLButtonElement>("button[data-speed]")];
@@ -183,6 +205,7 @@ export async function startGame(): Promise<void> {
 
   const show = (next: Screen): void => {
     screen = next;
+    gameEl.dataset.screen = next;
     attract.hidden = next !== "attract";
     idleEl.hidden = next !== "idle";
     scoreScreen.hidden = next !== "score";
@@ -199,12 +222,19 @@ export async function startGame(): Promise<void> {
       .slice(0, 5)
       .map((e, i) => {
         const li = document.createElement("li");
+        const rank = document.createElement("span");
+        rank.className = "rank";
+        rank.textContent = `${i + 1}.`;
         const who = document.createElement("b");
+        who.className = "who";
         who.textContent = normalizeInitials(e.initials);
         const title = document.createElement("span");
-        title.className = "dim";
+        title.className = "lvl";
         title.textContent = loaded.find((l) => l.level.id === e.levelId)?.featured.title ?? "?";
-        li.append(`${i + 1}. `, who, ` ${Math.round(e.points)} `, title);
+        const pts = document.createElement("span");
+        pts.className = "pts";
+        pts.textContent = String(Math.round(e.points));
+        li.append(rank, " ", who, " ", title, " ", pts);
         return li;
       });
     if (rows.length === 0) {
@@ -272,7 +302,9 @@ export async function startGame(): Promise<void> {
     root.removeChildren();
     scale = size / Math.max(world.map.width, world.map.height);
     root.scale.set(scale);
-    root.addChild(drawMap(world.map), dyn);
+    // CSS px per world unit (the canvas shrinks on narrow screens), for minimum label sizes.
+    const cssK = Math.min(1, (innerWidth - 2 * STAGE_PAD) / size);
+    root.addChild(drawMap(world.map, { cssPxPerUnit: scale * cssK }), dyn);
     el<HTMLSpanElement>("hudLevel").textContent = `${l.featured.title}${l.synthetic ? " (synthetic)" : ""}`;
     el<HTMLSpanElement>("hudGoal").textContent =
       l.level.clutcherSide === "defense" ? "Defend: hold E on the spike for 5 s, or win the fight" : "Attack: survive until the spike blows, or win the fight";
@@ -321,6 +353,7 @@ export async function startGame(): Promise<void> {
     scoreDeadline = performance.now() + SCORE_RETURN_S * 1000;
     scoreShownMs = performance.now();
     savedAtMs = null;
+    scoreScreen.dataset.result = card.won ? "won" : "lost";
     el<HTMLHeadingElement>("resultTitle").textContent = card.won ? "Clutched!" : "Not this time";
     el<HTMLParagraphElement>("resultReason").textContent = REASON_TEXT[card.reason];
     const rows: [string, string, string][] = [
@@ -392,14 +425,18 @@ export async function startGame(): Promise<void> {
     if (!finished || !card || screen !== "score") return;
     closeReplay();
     const timeline = buildYouTimeline(finished.world, finished.seed, finished.recording);
-    // Two square panels side by side: shrink the canvas to their height (+ title row) meanwhile.
-    const replayH = Math.ceil((size - 16) / 2) + 40;
-    app.renderer.resize(size, replayH);
+    // Two square panels as large as the viewport allows (minus the replay bar), side by side or
+    // stacked on portrait phones; CSS centres canvas + bar vertically. Measured before the first paint.
+    replayBar.hidden = false;
+    const barH = replayBar.offsetHeight;
+    const fit = replayLayout(innerWidth - 2 * STAGE_PAD, innerHeight - barH - 4 * STAGE_PAD);
+    app.renderer.resize(fit.width, fit.height);
     const view = new ReplayView({
       world: finished.world,
       timeline,
-      width: size,
-      height: replayH,
+      width: fit.width,
+      height: fit.height,
+      layout: fit.layout,
       onTime: (t, startT, endT) => {
         replaySlider.value = String(t);
         const label = `${(t - startT).toFixed(1)} / ${(endT - startT).toFixed(1)} s`;
@@ -453,11 +490,23 @@ export async function startGame(): Promise<void> {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.dataset.level = String(i);
+      btn.dataset.map = l.featured.map;
+      const thumb = document.createElement("span");
+      thumb.className = "lvl-thumb";
+      const map = document.createElement("span");
+      map.className = "lvl-map";
+      map.textContent = l.featured.map;
+      thumb.append(map);
+      const key = document.createElement("span");
+      key.className = "lvl-key";
+      key.textContent = String(i + 1);
       const title = document.createElement("b");
-      title.textContent = `${i + 1}. ${l.featured.title}`;
+      title.className = "lvl-title";
+      title.textContent = l.featured.title;
       const blurb = document.createElement("span");
+      blurb.className = "lvl-blurb";
       blurb.textContent = l.blurb;
-      btn.append(title, blurb);
+      btn.append(thumb, key, title, blurb);
       return btn;
     }),
   );
@@ -726,7 +775,8 @@ export async function startGame(): Promise<void> {
     if (s.tick !== before) for (const shot of s.shots) tracers.push({ shot, untilMs: now + TRACER_MS });
     tracers = tracers.filter((tr) => tr.untilMs > now);
 
-    drawDynamic(dyn, world, s, input, tracers);
+    // Autopilot input always carries a real aim; a human's only after the pointer touched the canvas.
+    drawDynamic(dyn, world, s, pilot || controls.hasAimed ? input.aim : null, tracers, now);
     updateHud(world, s);
     if (s.outcome) toScore(s, current, session);
   });
@@ -757,49 +807,49 @@ export async function startGame(): Promise<void> {
   }
 }
 
-function drawDynamic(g: Graphics, world: World, s: SimState, input: Input, tracers: readonly Tracer[]): void {
+function drawDynamic(g: Graphics, world: World, s: SimState, aim: Vec2 | null, tracers: readonly Tracer[], nowMs: number): void {
   g.clear();
   const p = s.clutcher;
   if (world.spike && clockAt(world, simTimeAt(world, s.tick)).spikeActive) {
-    const sp = world.spike;
-    g.circle(sp.x, sp.y, DEFUSE_RADIUS).stroke({ width: 14, color: 0xff3b3b, alpha: 0.6 });
-    g.rect(sp.x - 60, sp.y - 60, 120, 120).fill({ color: 0xff3b3b });
-    if (p.defuseTicks > 0) {
-      const frac = p.defuseTicks / (DEFUSE_S * TICK_HZ);
-      g.rect(sp.x - 200, sp.y + 240, 400 * frac, 50).fill({ color: 0x6bff95 });
-    }
+    const full = DEFUSE_S * TICK_HZ;
+    const enemyTicks = Math.max(0, ...s.enemies.filter((e) => e.alive).map((e) => e.defuseTicks));
+    drawSpike(g, world.spike, {
+      defuse: p.defuseTicks / full,
+      enemyDefuse: enemyTicks / full,
+      pulseT: prefersReducedMotion() ? null : nowMs / 1000,
+    });
   }
   for (const e of s.enemies) {
     if (!e.alive) {
-      g.moveTo(e.x - 80, e.y - 80).lineTo(e.x + 80, e.y + 80).moveTo(e.x + 80, e.y - 80).lineTo(e.x - 80, e.y + 80);
-      g.stroke({ width: 24, color: ENEMY_COLOR, alpha: 0.5 });
+      drawDown(g, e.x, e.y);
       continue;
     }
     // Fog of war: only enemies in the clutcher's line of sight are drawn.
     if (!segmentClear(world.map.walls, p, e)) continue;
-    g.circle(e.x, e.y, 110).fill({ color: ENEMY_COLOR });
-    g.moveTo(e.x, e.y).lineTo(e.x + e.fx * 220, e.y + e.fy * 220).stroke({ width: 22, color: 0xffffff, alpha: 0.8 });
+    drawEnemy(g, e);
   }
-  g.moveTo(p.x, p.y).lineTo(input.aim.x, input.aim.y).stroke({ width: 8, color: PLAYER_COLOR, alpha: 0.25 });
-  g.circle(p.x, p.y, 120).fill({ color: PLAYER_COLOR }).stroke({ width: 16, color: 0xffffff });
-  for (const { shot } of tracers) {
-    const color = shot.by === "P0" ? 0xfff3b0 : 0xff8a7a;
-    g.moveTo(shot.from.x, shot.from.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 14, color, alpha: 0.85 });
-  }
+  drawPlayer(g, p, aim);
+  for (const { shot, untilMs } of tracers) drawTracer(g, shot, (untilMs - nowMs) / TRACER_MS + 0.3);
 }
 
 function updateHud(world: World, s: SimState): void {
   const clock = clockAt(world, simTimeAt(world, s.tick));
-  el<HTMLSpanElement>("hudHp").textContent = String(s.clutcher.hp);
+  const hp = el<HTMLSpanElement>("hudHp");
+  hp.textContent = String(s.clutcher.hp);
+  hp.dataset.low = String(s.clutcher.hp <= LOW_HP);
   el<HTMLSpanElement>("hudEnemies").textContent = `${s.enemies.filter((e) => e.alive).length} / ${s.enemies.length}`;
   el<HTMLSpanElement>("hudClock").textContent = `${Math.max(0, clock.secondsLeft).toFixed(1)} s`;
   const enemyDefuse = Math.max(0, ...s.enemies.filter((e) => e.alive).map((e) => e.defuseTicks));
   const pct = (ticks: number): number => Math.round((ticks / (DEFUSE_S * TICK_HZ)) * 100);
-  el<HTMLSpanElement>("hudSpike").textContent = clock.spikeActive
-    ? s.clutcher.defuseTicks > 0
+  const spike = el<HTMLSpanElement>("hudSpike");
+  const state = !clock.spikeActive ? "idle" : s.clutcher.defuseTicks > 0 ? "defusing" : enemyDefuse > 0 ? "enemy" : "planted";
+  spike.dataset.state = state;
+  spike.textContent =
+    state === "defusing"
       ? `defusing ${pct(s.clutcher.defuseTicks)}%`
-      : enemyDefuse > 0
+      : state === "enemy"
         ? `ENEMY DEFUSING ${pct(enemyDefuse)}%`
-        : "planted"
-    : "not planted";
+        : state === "planted"
+          ? "planted"
+          : "not planted";
 }

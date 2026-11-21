@@ -1,6 +1,7 @@
 // Pixi's shader/uniform sync uses `new Function` by default; this module swaps in eval-free
 // implementations so the CSP can keep `script-src 'self'` without 'unsafe-eval'.
 import "pixi.js/unsafe-eval";
+import "./ui/theme.css";
 import { startGame } from "./game/gamePage";
 
 // The debug page is dev-only: the dynamic import sits behind import.meta.env.DEV so production

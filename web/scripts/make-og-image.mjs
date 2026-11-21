@@ -1,6 +1,7 @@
 // Draw the 1200x630 social preview (Open Graph / Twitter card) into public/og-image.png.
-// Dependency-free and deterministic: original art only (crosshair logo from favicon.svg, an abstract
-// made-up floor plan, a built-in 5x7 pixel font). Re-run with `pnpm og-image` after changing it.
+// Dependency-free and deterministic: original art only (logo mark from favicon.svg, an abstract
+// made-up floor plan, a built-in 5x7 pixel font), in the Tactical HUD palette of src/ui/theme.ts.
+// Re-run with `pnpm og-image` after changing it; the PNG output is committed.
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,15 +14,20 @@ const BW = W * SS;
 const BH = H * SS;
 const buf = new Float32Array(BW * BH * 3);
 
+// Palette = THEME in src/ui/theme.ts (Tactical HUD).
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-const BG = hex("#14110f");
-const GRID = hex("#1d1916");
-const ROOM = hex("#1f1a17");
-const WALL = hex("#4a3f35");
-const GOLD = hex("#ffd479");
-const RED = hex("#ff7a6b");
-const TEXT = hex("#e8e1d6");
-const DIM = hex("#a89c8c");
+const BG = hex("#06090d");
+const GRID = hex("#0d141b");
+const GRID_MAJOR = hex("#16222d");
+const FLOOR = hex("#070b10");
+const WALL = hex("#111b25");
+const SURFACE = hex("#0f1720");
+const LINE_HI = hex("#35505f");
+const CYAN = hex("#3ee6ff");
+const AMBER = hex("#ffb84d");
+const RED = hex("#ff5a62");
+const TEXT = hex("#e4eef3");
+const DIM = hex("#93a7b3");
 
 function plot(x, y, c, a = 1) {
   if (x < 0 || y < 0 || x >= BW || y >= BH) return;
@@ -78,9 +84,29 @@ function dashed(points, t, dash, gap, c, a) {
   }
 }
 
-const room = (x, y, w, h) => {
-  rect(x, y, w, h, WALL);
-  rect(x + 4, y + 4, w - 8, h - 8, ROOM);
+/** Convex/concave polygon fill (even-odd), points in output pixels. */
+function poly(pts, c, a) {
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const inside = (x, y) => {
+    let hit = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const [xi, yi] = pts[i];
+      const [xj, yj] = pts[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit;
+    }
+    return hit;
+  };
+  fill(inside, Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys), c, a);
+}
+
+const outline = (pts, t, c, a) => pts.forEach((p, i) => segment(...p, ...pts[(i + 1) % pts.length], t, c, a));
+
+/** Solid wall block: soft cyan halo, dark fill, thin cyan edge (as in mapView.ts). */
+const block = (x, y, w, h) => {
+  rect(x - 5, y - 5, w + 10, h + 10, CYAN, 0.06);
+  rect(x, y, w, h, CYAN, 0.55);
+  rect(x + 2, y + 2, w - 4, h - 4, WALL);
 };
 
 // 5x7 pixel font, one string of 7 rows (5 bits each) per glyph.
@@ -119,53 +145,101 @@ function text(str, x, y, s, c) {
   return cx - x - s;
 }
 
-// Background and a faint tactical grid.
+// Background and a faint tactical grid; cyan rule along the top.
 rect(0, 0, W, H, BG);
-for (let x = 0; x <= W; x += 40) rect(x, 0, 1, H, GRID);
-for (let y = 0; y <= H; y += 40) rect(0, y, W, 1, GRID);
+for (let x = 0; x <= W; x += 40) rect(x, 0, 1, H, x % 200 === 0 ? GRID_MAJOR : GRID);
+for (let y = 0; y <= H; y += 40) rect(0, y, W, 1, y % 200 === 0 ? GRID_MAJOR : GRID);
+rect(0, 0, W, 6, CYAN);
+rect(0, 6, 220, 3, AMBER);
 
-// Abstract original floor plan on the right (not based on any real map).
-const MX = 730;
-room(MX, 70, 200, 150);
-room(MX + 240, 70, 200, 230);
-room(MX, 260, 140, 300);
-room(MX + 180, 340, 260, 220);
-rect(MX + 196, 130, 48, 40, ROOM); // doorways
-rect(MX + 60, 216, 50, 48, ROOM);
-rect(MX + 136, 420, 48, 50, ROOM);
-rect(MX + 330, 296, 60, 48, ROOM);
-rect(MX + 250, 420, 40, 40, WALL); // crate
-rect(MX + 60, 320, 36, 36, WALL);
+// Abstract original floor plan on the right (not based on any real map), in a bevelled HUD frame.
+const MX = 720;
+const MY = 60;
+const MW = 440;
+const MH = 510;
+const frame = [[MX, MY], [MX + MW - 24, MY], [MX + MW, MY + 24], [MX + MW, MY + MH], [MX + 24, MY + MH], [MX, MY + MH - 24]];
+poly(frame, FLOOR);
+for (let x = MX + 40; x < MX + MW; x += 40) rect(x, MY, 1, MH, GRID_MAJOR, 0.6);
+for (let y = MY + 40; y < MY + MH; y += 40) rect(MX, y, MW, 1, GRID_MAJOR, 0.6);
+outline(frame, 1.5, LINE_HI);
+rect(MX, MY, 48, 3, CYAN);
 
-// Enemy rails (dashed red) and the clutcher's path (gold).
-dashed([[MX + 400, 110], [MX + 360, 250], [MX + 360, 320], [MX + 400, 420]], 4, 12, 9, RED, 0.75);
-dashed([[MX + 40, 110], [MX + 160, 150], [MX + 290, 130]], 4, 12, 9, RED, 0.75);
-dashed([[MX + 60, 520], [MX + 90, 440], [MX + 230, 445]], 4, 12, 9, RED, 0.75);
-segment(MX + 80, 300, MX + 160, 445, 6, GOLD, 0.9);
-segment(MX + 160, 445, MX + 330, 500, 6, GOLD, 0.9);
-for (const [x, y] of [[MX + 400, 420], [MX + 290, 130], [MX + 230, 445]]) {
-  disc(x, y, 14, RED);
-  disc(x, y, 6, BG);
+// Site zone (amber tint, dashed edge, corner brackets) with its letter.
+const SX = MX + 250;
+const SY = MY + 330;
+rect(SX, SY, 160, 140, AMBER, 0.08);
+dashed([[SX, SY], [SX + 160, SY], [SX + 160, SY + 140], [SX, SY + 140], [SX, SY]], 2, 8, 6, AMBER, 0.55);
+for (const [x, y, dx, dy] of [[SX, SY, 1, 1], [SX + 160, SY, -1, 1], [SX + 160, SY + 140, -1, -1], [SX, SY + 140, 1, -1]]) {
+  segment(x, y, x + dx * 30, y, 4, AMBER);
+  segment(x, y, x, y + dy * 30, 4, AMBER);
 }
-disc(MX + 330, 500, 16, GOLD);
-ring(MX + 330, 500, 28, 4, GOLD, 0.6);
+text("A", SX + 18, SY + 18, 5, AMBER);
 
-// Crosshair logo (same motif as favicon.svg).
-const LX = 96;
-const LY = 104;
-ring(LX, LY, 30, 8, GOLD);
-for (const [ax, ay, bx, by] of [[0, -50, 0, -22], [0, 22, 0, 50], [-50, 0, -22, 0], [22, 0, 50, 0]]) {
-  segment(LX + ax, LY + ay, LX + bx, LY + by, 8, GOLD);
+// Walls.
+block(MX + 30, MY + 40, 180, 26);
+block(MX + 30, MY + 40, 26, 200);
+block(MX + 270, MY + 40, 26, 170);
+block(MX + 296, MY + 184, 120, 26);
+block(MX + 120, MY + 150, 90, 70);
+block(MX + 30, MY + 300, 150, 26);
+block(MX + 154, MY + 326, 26, 150);
+block(MX + 330, MY + 260, 50, 40);
+block(MX + 60, MY + 420, 50, 50);
+
+// Enemy view cones / rails (red) and the clutcher's path (cyan) ending at the spike.
+dashed([[MX + 400, 90], [MX + 360, 240], [MX + 380, 330]], 3, 10, 8, RED, 0.7);
+dashed([[MX + 90, 120], [MX + 230, 130]], 3, 10, 8, RED, 0.7);
+dashed([[MX + 90, 500], [MX + 220, 470]], 3, 10, 8, RED, 0.7);
+const PX = MX + 240;
+const PY = MY + 260;
+segment(MX + 80, MY + 260, PX, PY, 5, CYAN, 0.85);
+segment(PX, PY, SX + 80, SY + 70, 5, CYAN, 0.85);
+for (const [x, y] of [[MX + 380, 330], [MX + 230, MY + 70], [MX + 220, MY + 410]]) {
+  disc(x, y, 20, RED, 0.15);
+  disc(x, y, 11, RED);
 }
-disc(LX, LY, 8, RED);
+poly([[SX + 80, SY + 56], [SX + 94, SY + 70], [SX + 80, SY + 84], [SX + 66, SY + 70]], RED); // spike
+ring(SX + 80, SY + 70, 30, 3, RED, 0.7);
+disc(MX + 80, MY + 260, 26, CYAN, 0.12);
+disc(MX + 80, MY + 260, 13, CYAN);
+ring(MX + 80, MY + 260, 13, 3, TEXT);
+
+// Logo mark (same geometry as favicon.svg / #rtr-mark, viewBox 64 scaled to 112 px).
+const LX = 60;
+const LY = 52;
+const LS = 112 / 64;
+const L = (x, y) => [LX + x * LS, LY + y * LS];
+const oct = [L(14, 4), L(50, 4), L(60, 14), L(60, 50), L(50, 60), L(14, 60), L(4, 50), L(4, 14)];
+poly(oct, SURFACE);
+outline(oct, 3 * LS, LINE_HI);
+{
+  const [cx, cy] = L(32, 32);
+  const r = 14 * LS;
+  const t = 4 * LS;
+  // Ring with a gap at the top (between -130° and -50°), as the SVG arc.
+  fill((x, y) => {
+    const d = Math.hypot(x - cx, y - cy);
+    if (Math.abs(d - r) > t / 2) return false;
+    const ang = (Math.atan2(y - cy, x - cx) * 180) / Math.PI;
+    return !(ang > -130 && ang < -50);
+  }, cx - r - t, cy - r - t, cx + r + t, cy + r + t, CYAN);
+  poly([L(37.9, 18.7), L(43.3, 18.6), L(38.8, 24)], CYAN);
+  for (const [a, b] of [[[32, 11], [32, 22]], [[32, 42], [32, 53]], [[11, 32], [22, 32]], [[42, 32], [53, 32]]]) {
+    segment(...L(...a), ...L(...b), 3 * LS, TEXT);
+  }
+  disc(cx, cy, 3.5 * LS, AMBER);
+}
 
 // Copy.
-text("RELIVE", 60, 190, 12, GOLD);
-text("THE ROUND", 60, 290, 12, GOLD);
-text("COULD YOU HAVE CLUTCHED IT?", 62, 412, 4, TEXT);
-text("REAL 1VN PRO CLUTCHES - BEAT THE PRO", 62, 470, 3, DIM);
-rect(62, 530, 120, 4, RED);
+text("RELIVE", 60, 210, 12, TEXT);
+text("THE ROUND", 60, 310, 12, CYAN);
+text("COULD YOU HAVE CLUTCHED IT?", 62, 428, 4, TEXT);
+text("REAL 1VN PRO CLUTCHES - BEAT THE PRO", 62, 480, 3, DIM);
+rect(62, 530, 120, 4, AMBER);
 text("RELIVE-THE-ROUND.VERCEL.APP", 62, 556, 3, DIM);
+
+// Subtle scanlines over everything.
+for (let y = 0; y < H; y += 3) rect(0, y, W, 1, [0, 0, 0], 0.07);
 
 // Downsample and encode as an 8-bit RGB PNG.
 const raw = Buffer.alloc(H * (1 + W * 3));
