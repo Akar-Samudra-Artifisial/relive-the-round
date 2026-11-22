@@ -94,7 +94,9 @@ describe("determinism", () => {
     const files = Object.entries(sources);
     expect(files.length).toBeGreaterThan(5);
     for (const [file, src] of files) {
-      expect(String(src), file).not.toMatch(/Math\.random|\bDate\b|performance\.now|\bwindow\b|\bdocument\b|pixi/);
+      expect(String(src), file).not.toMatch(
+        /Math\.random|\bDate\b|performance\.now|\bwindow\b|\bdocument\b|pixi|from\s*["']three|import\s*\(?\s*["']three/,
+      );
     }
   });
 });

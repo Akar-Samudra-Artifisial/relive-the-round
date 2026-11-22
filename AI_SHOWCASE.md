@@ -108,6 +108,8 @@ The 3D renderer is planned as phased Junie tasks. Phase 0 is written as a prompt
 [`docs/ai-showcase/07-3d-phase-0/prompt.md`](docs/ai-showcase/07-3d-phase-0/prompt.md): load Three.js
 as a lazy chunk only when the URL has `?3d=1`, with no change for normal players, inside the existing
 CSP and `verify-dist` checks. That session has not run yet; it will be exported the same way once it does.
+Update: phases 0-8 of the 3D renderer have shipped, and 3D is now the default renderer when WebGL2
+is available (`?2d=1` forces 2D); see [`docs/3d-renderer.md`](docs/3d-renderer.md).
 
 ## How to verify
 

@@ -1,22 +1,26 @@
-import { Application, Container, Graphics } from "pixi.js";
 import { mapFor } from "../maps";
-import { drawMap } from "../render/mapView";
-import { drawDown, drawEnemy, drawPlayer, drawSpike, drawTracer } from "../render/actors";
+import { createFpsWatchdog } from "../render/fpsWatchdog";
+import { createPixi2dRenderer } from "../render/pixi2d";
+import { initialTier, lowerTier, type QualityTier } from "../render/quality";
+import type { FrameView, GameRenderer } from "../render/renderer";
+import { detectCaps, pickRenderer } from "../render/select";
+import type { SwitchableRenderer } from "../render/switchable";
 import { DEFUSE_S, TICK_HZ } from "../sim/constants";
-import { segmentClear, type Vec2 } from "../sim/geom";
+import type { Vec2 } from "../sim/geom";
 import { ensureFonts, prefersReducedMotion } from "../ui/fonts";
-import { THEME_NUM } from "../ui/theme";
-import { clockAt, NO_INPUT, simTimeAt, type Input, type ShotEvent, type SimState } from "../sim/sim";
+import { clockAt, NO_INPUT, simTimeAt, type Input, type SimState } from "../sim/sim";
 import { buildWorld, type World } from "../sim/world";
 import { createAutopilot, type Autopilot } from "./autopilot";
 import { qrMatrix, renderCard, type QrMatrix } from "./cardImage";
 import { challengeLines, landingAction, replayKeyAction } from "./challengeLanding";
-import { blocksDefault, clientToCanvas, mapInput, renderResolution, type Screen } from "./input";
+import { createFrameLoop } from "./frameLoop";
+import { liveFrame, TRACER_MS, type LiveTracer } from "./frameView";
+import { blocksDefault, mapInput, type Screen } from "./input";
 import { attractSlide, CornerTaps, isResetChord, kioskScoreDeadline, parseKiosk, RESET_CONFIRM_S } from "./kiosk";
 import { addEntry, clearEntries, normalizeInitials, topEntries, validInitials } from "./leaderboard";
 import { FEATURED, loadFeatured, type LoadedLevel } from "./levels";
 import { buildYouTimeline, replayLayout } from "./replayModel";
-import { ReplayView, type ReplaySpeed } from "./replayView";
+import { ReplayPlayer, type ReplaySpeed } from "./replayPlayer";
 import { scoreRound, type ScoreCard } from "./score";
 import { Session } from "./session";
 import { controlsHint, defuseAvailable, goalText, nextTouchActive, type TouchModeEvent } from "./touch";
@@ -32,7 +36,6 @@ import {
   shouldAbortPlay,
 } from "./timing";
 
-const TRACER_MS = 120;
 /** Matches the #gameStage / #replayBar spacing (--s-3) in theme.css. */
 const STAGE_PAD = 12;
 /** HUD turns the HP readout red at or below this value. */
@@ -44,8 +47,6 @@ function el<T extends HTMLElement>(id: string): T {
   if (!e) throw new Error(`game: missing #${id}`);
   return e as T;
 }
-
-type Tracer = { shot: ShotEvent; untilMs: number };
 
 /** Buttons and form fields handle Enter/Space/arrows natively; global shortcuts must not double up. */
 function isControl(t: EventTarget | null): boolean {
@@ -80,21 +81,22 @@ const REASON_TEXT: Record<ScoreCard["reason"], string> = {
 /** Mutable keyboard/mouse snapshot, turned into an immutable Input once per frame by `mapInput`. */
 class Controls {
   private keys = new Set<string>();
-  private aimPx: Vec2 = { x: 0, y: 0 };
+  /** Last pointer aim in world units (cm); kept while the pointer is outside every map panel. */
+  private aimWorld: Vec2 = { x: 0, y: 0 };
   /** False until the pointer has moved/pressed on the canvas: (0,0) is not a real aim yet. */
   hasAimed = false;
   private firing = false;
 
   /**
-   * `logicalWidth`: current stage width in logical px (app.screen.width), not canvas.width.
+   * `toWorld`: pointer client px → world point via the renderer (null outside the map panels).
    * While touch mode is on, finger taps on the canvas are ignored (the on-screen sticks aim and fire).
    */
   constructor(
     canvas: HTMLCanvasElement,
     screen: () => Screen,
-    logicalWidth: () => number,
+    private readonly toWorld: (clientX: number, clientY: number) => Vec2 | null,
     private readonly touch: TouchControls,
-    touchActive: () => boolean,
+    private readonly touchActive: () => boolean,
   ) {
     addEventListener("keydown", (e) => {
       this.keys.add(e.code);
@@ -107,29 +109,37 @@ class Controls {
       this.firing = false;
       touch.release();
     });
-    const ignored = (e: PointerEvent): boolean => e.pointerType === "touch" && touchActive();
-    // CSS may shrink the canvas and HiDPI renders it at resolution × size: map to logical px.
-    const toCanvas = (e: PointerEvent): Vec2 => clientToCanvas(e.clientX, e.clientY, canvas.getBoundingClientRect(), logicalWidth());
+    addEventListener("pointerup", () => (this.firing = false));
+    this.bindCanvas(canvas);
+  }
+
+  /** Pointer aim/fire listeners on the game canvas; called again when the renderer swaps canvases. */
+  bindCanvas(canvas: HTMLCanvasElement): void {
+    const ignored = (e: PointerEvent): boolean => e.pointerType === "touch" && this.touchActive();
+    const aimAt = (e: PointerEvent): void => {
+      const w = this.toWorld(e.clientX, e.clientY);
+      if (!w) return;
+      this.aimWorld = w;
+      this.hasAimed = true;
+    };
     canvas.addEventListener("pointermove", (e) => {
       if (ignored(e)) return;
-      this.aimPx = toCanvas(e);
-      this.hasAimed = true;
+      aimAt(e);
     });
     canvas.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 || ignored(e)) return;
-      this.aimPx = toCanvas(e);
-      this.hasAimed = true;
+      aimAt(e);
       this.firing = true;
     });
-    addEventListener("pointerup", () => (this.firing = false));
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
   /** `player`: clutcher position (cm), the origin of the touch aim. */
-  read(scale: number, player: Vec2): Input {
+  read(player: Vec2): Input {
     const touch = this.touch.overrides(player);
     if (touch?.aim) this.hasAimed = true;
-    return mapInput({ keys: this.keys, aimPx: this.aimPx, pointerDown: this.firing, touch }, scale);
+    // The renderer already converted the pointer to world units, hence scale 1.
+    return mapInput({ keys: this.keys, aimPx: this.aimWorld, pointerDown: this.firing, touch }, 1);
   }
 }
 
@@ -139,12 +149,38 @@ function randomSeed(): number {
   return a[0]!;
 }
 
+/**
+ * Lazily loads the three.js renderer; any import or WebGL init error warns once and falls back to
+ * Pixi 2D. A working 3D renderer is wrapped so it can still swap to 2D at runtime.
+ */
+async function create3dOr2d(
+  size: number,
+  tier: QualityTier,
+  onSwap: (next: GameRenderer) => void,
+): Promise<{ renderer: GameRenderer; switchable: SwitchableRenderer | null }> {
+  const make2d = (): Promise<GameRenderer> => createPixi2dRenderer({ width: size, height: size });
+  try {
+    // The runtime switch only matters for 3D, so it stays out of the entry chunk too.
+    const [{ createThree3dRenderer }, { createSwitchableRenderer }] = await Promise.all([
+      import("../render/three3d/three3d"),
+      import("../render/switchable"),
+    ]);
+    const primary = await createThree3dRenderer({ width: size, height: size, tier });
+    const switchable = createSwitchableRenderer(primary, make2d, onSwap);
+    return { renderer: switchable, switchable };
+  } catch (err) {
+    console.warn("[renderer] 3D unavailable, falling back to 2D", err);
+    return { renderer: await make2d(), switchable: null };
+  }
+}
+
 export async function startGame(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const auto = params.has("auto");
   const showFps = auto || params.has("fps");
   const fixedSeed = params.get("seed");
   const kiosk = parseKiosk(location.search);
+  const rendererPick = pickRenderer(location.search, detectCaps());
 
   const loaded: LoadedLevel[] = await Promise.all(FEATURED.map(loadFeatured));
   const worlds = new Map<LoadedLevel, World>(loaded.map((l) => [l, buildWorld(mapFor(l.level.map), l.level)]));
@@ -160,21 +196,15 @@ export async function startGame(): Promise<void> {
   const stageEl = el<HTMLDivElement>("gameStage");
   // Leaves room for the HUD strip above the canvas; CSS scales the canvas down on narrow screens.
   const size = Math.max(480, Math.min(innerWidth - 24, innerHeight - 104));
-  const app = new Application();
-  // HiDPI: render at devicePixelRatio (capped at 2) with the same CSS size (autoDensity).
-  await app.init({
-    width: size,
-    height: size,
-    background: THEME_NUM.bg,
-    antialias: true,
-    resolution: renderResolution(window.devicePixelRatio),
-    autoDensity: true,
-  });
-  stageEl.appendChild(app.canvas);
-
-  const root = new Container();
-  app.stage.addChild(root);
-  const dyn = new Graphics();
+  let tier = initialTier(location.search, { coarse: matchMedia("(pointer: coarse)").matches });
+  // A swap can finish before `controls` exists; the canvas appended below is already the current one.
+  let ready = false;
+  const { renderer, switchable }: { renderer: GameRenderer; switchable: SwitchableRenderer | null } =
+    rendererPick.kind === "3d"
+      ? await create3dOr2d(size, tier, (next) => onRendererSwap(next))
+      : { renderer: await createPixi2dRenderer({ width: size, height: size }), switchable: null };
+  const watchdog = switchable ? createFpsWatchdog() : null;
+  stageEl.appendChild(renderer.canvas);
 
   const attract = el<HTMLDivElement>("attract");
   const idleEl = el<HTMLDivElement>("idle");
@@ -189,13 +219,17 @@ export async function startGame(): Promise<void> {
   // ?touch=1 pins touch mode on (desktop testing); otherwise coarse pointers start in touch mode.
   const touchForced = params.get("touch") === "1";
   let touchActive = touchForced || matchMedia("(pointer: coarse)").matches;
-  const controls = new Controls(app.canvas, () => screen, () => app.screen.width, touchControls, () => touchActive);
+  const controls = new Controls(renderer.canvas, () => screen, (x, y) => renderer.screenToWorld(x, y), touchControls, () => touchActive);
+  ready = true;
   let session: Session | null = null;
   let pilot: Autopilot | null = null;
   let playStartedMs = 0;
   let current: LoadedLevel | null = null;
-  let scale = 1;
-  let tracers: Tracer[] = [];
+  /** CSS px per world unit of the live map (label minimum sizes), restored after a replay. */
+  let liveCssPxPerUnit = 1;
+  let tracers: LiveTracer[] = [];
+  /** Last live frame: drawn during play and kept on the canvas behind the score screen. */
+  let lastLive: FrameView | null = null;
   let scoreDeadline = 0;
   /** Kiosk score timer: when the score screen (re)appeared, when initials were saved, last input. */
   let scoreShownMs = 0;
@@ -207,7 +241,7 @@ export async function startGame(): Promise<void> {
   let saved = false;
   /** Session of the round shown on the score screen (seed + recording feed the replay). */
   let finished: Session | null = null;
-  let replay: ReplayView | null = null;
+  let replay: ReplayPlayer | null = null;
   let replayDeadline = 0;
   let replayEnded = false;
   /** Challenge from `#c=…` waiting on the attract screen. */
@@ -233,8 +267,7 @@ export async function startGame(): Promise<void> {
     hud.hidden = next !== "play";
     countdownEl.hidden = next !== "play";
     replayBar.hidden = next !== "replay";
-    root.visible = next !== "replay";
-    app.canvas.style.visibility = next === "attract" || next === "idle" ? "hidden" : "visible";
+    renderer.canvas.style.visibility = next === "attract" || next === "idle" ? "hidden" : "visible";
     if (next !== "play") touchControls.reset();
     applyInputMode();
   };
@@ -338,12 +371,12 @@ export async function startGame(): Promise<void> {
     pilot = auto ? createAutopilot(world) : null;
     playStartedMs = performance.now();
     tracers = [];
-    root.removeChildren();
-    scale = size / Math.max(world.map.width, world.map.height);
-    root.scale.set(scale);
+    lastLive = null;
+    const scale = size / Math.max(world.map.width, world.map.height);
     // CSS px per world unit (the canvas shrinks on narrow screens), for minimum label sizes.
     const cssK = Math.min(1, (innerWidth - 2 * STAGE_PAD) / size);
-    root.addChild(drawMap(world.map, { cssPxPerUnit: scale * cssK }), dyn);
+    liveCssPxPerUnit = scale * cssK;
+    showLiveMap(world);
     el<HTMLSpanElement>("hudLevel").textContent = `${l.featured.title}${l.synthetic ? " (synthetic)" : ""}`;
     touchControls.reset();
     touchControls.setDefuseVisible(false);
@@ -361,10 +394,19 @@ export async function startGame(): Promise<void> {
     startLevel(level, challenge.seed);
   };
 
-  /** Tears the replay down (ticker listener + Pixi objects); safe to call when none is open. */
+  /** One square panel filling the live canvas. */
+  function showLiveMap(world: World): void {
+    renderer.loadMap(world.map, { cssPxPerUnit: liveCssPxPerUnit });
+    renderer.setPanels([{ x: 0, y: 0, size }]);
+  }
+
+  /** Tears the replay down and restores the live canvas; safe to call when none is open. */
   const closeReplay = (): void => {
-    if (replay) app.renderer.resize(size, size);
-    replay?.destroy();
+    if (replay) {
+      replay.pause();
+      renderer.resize(size, size);
+      if (current) showLiveMap(worlds.get(current)!);
+    }
     replay = null;
     replayEnded = false;
   };
@@ -469,28 +511,26 @@ export async function startGame(): Promise<void> {
     replayBar.hidden = false;
     const barH = replayBar.offsetHeight;
     const fit = replayLayout(innerWidth - 2 * STAGE_PAD, innerHeight - barH - 4 * STAGE_PAD);
-    app.renderer.resize(fit.width, fit.height);
-    const view = new ReplayView({
+    renderer.resize(fit.width, fit.height);
+    const view = new ReplayPlayer({
       world: finished.world,
       timeline,
-      width: fit.width,
-      height: fit.height,
-      layout: fit.layout,
       onTime: (t, startT, endT) => {
         replaySlider.value = String(t);
         const label = `${(t - startT).toFixed(1)} / ${(endT - startT).toFixed(1)} s`;
         el<HTMLSpanElement>("replayTime").textContent = label;
         replaySlider.setAttribute("aria-valuetext", label);
       },
-      // Leaving inside the ticker callback would destroy the view mid-update; the main loop does it.
+      // Leaving inside the player update would close the replay mid-update; the main loop does it.
       onEnd: () => (replayEnded = true),
     });
     replay = view;
+    // The replay canvas is sized to the viewport, so logical px == CSS px (no cssPxPerUnit).
+    renderer.loadMap(finished.world.map, {});
+    renderer.setPanels(view.panels(fit.width, fit.height, fit.layout));
     replaySlider.min = String(view.startT);
     replaySlider.max = String(view.endT);
     replaySlider.value = String(view.startT);
-    app.stage.addChild(view.view);
-    view.attach(app.ticker);
     setReplaySpeed(1);
     setReplayPlaying(true);
     replayEnded = false;
@@ -763,62 +803,115 @@ export async function startGame(): Promise<void> {
   let fpsAcc = 0;
   let fpsFrames = 0;
 
-  app.ticker.add((ticker) => {
-    fpsAcc += ticker.deltaMS;
+  /**
+   * Screen logic for one frame (`nowMs` = the frame clock). Returns the live state to show in the
+   * HUD when the play branch ran.
+   */
+  const step = (deltaMS: number, nowMs: number): { world: World; s: SimState } | null => {
+    if (screen === "replay") {
+      // The score timer is paused here; the replay has its own hard cap back to the (unsaved) score
+      // screen, which then restarts its own auto-return timer.
+      if (nowMs > replayDeadline) backToScore();
+      else if (replayEnded) backToScore();
+      return null;
+    }
+    if (kiosk.enabled && screen === "attract" && !resetOpen && nowMs - lastActivityMs > kiosk.attractIdleS * 1000) {
+      toIdle();
+      return null;
+    }
+    if (screen === "idle") {
+      renderIdleSlide();
+      return null;
+    }
+    if (screen === "score") {
+      const deadline = kiosk.enabled ? kioskScoreDeadline({ shownAtMs: scoreShownMs, savedAtMs, lastActivityMs }) : scoreDeadline;
+      const left = Math.max(0, Math.ceil((deadline - nowMs) / 1000));
+      el<HTMLSpanElement>("returnIn").textContent = String(left);
+      if (left === 0) toAttract();
+      return null;
+    }
+    if (screen !== "play" || !session || !current) return null;
+
+    const world = session.world;
+    if (shouldAbortPlay(nowMs - playStartedMs, session.state.outcome !== null, roundLimitS(world))) {
+      toAttract();
+      return null;
+    }
+    const before = session.state.tick;
+    // Autopilot is consulted once per sim tick (frame-rate independent); humans per frame.
+    const human = pilot ? null : controls.read(session.state.clutcher);
+    session.advance(deltaMS, pilot ?? human!);
+    const input = human ?? session.recording[session.recording.length - 1] ?? NO_INPUT;
+    const cd = session.countdown;
+    countdownEl.hidden = cd === 0;
+    el<HTMLDivElement>("countdownNum").textContent = String(cd);
+    const s = session.state;
+    if (s.tick !== before) for (const shot of s.shots) tracers.push({ shot, untilMs: nowMs + TRACER_MS });
+    tracers = tracers.filter((tr) => tr.untilMs > nowMs);
+
+    // Fog of war, defuse arcs and tracer fade are decided in liveFrame; the renderer only draws.
+    // Autopilot input always carries a real aim; a human's only after the pointer touched the canvas.
+    lastLive = liveFrame(world, s, pilot || controls.hasAimed ? input.aim : null, tracers, nowMs, { reducedMotion: prefersReducedMotion() });
+    touchControls.setDefuseVisible(touchControls.visible && defuseAvailable(world, s));
+    if (s.outcome) toScore(s, current, session);
+    return { world, s };
+  };
+
+  /** The 3D renderer was replaced by 2D: the round, session, replay and panels carry on untouched. */
+  function onRendererSwap(next: GameRenderer): void {
+    if (!ready) return;
+    controls.bindCanvas(next.canvas);
+    if ((screen === "play" || screen === "score") && lastLive) renderer.draw([lastLive]);
+  }
+
+  /** Watchdog verdict: one quality tier down, or 2D once the lowest tier is still too slow. */
+  const degradeQuality = (): void => {
+    if (switchable?.swapping) return;
+    const next = lowerTier(tier);
+    if (!next) {
+      void switchable?.swapToFallback("low fps");
+      return;
+    }
+    console.info(`[3d] quality ${tier} -> ${next}`);
+    tier = next;
+    renderer.setQuality?.(next);
+  };
+
+  /**
+   * Feeds the watchdog only while 3D is actually drawing in a visible, focused window: an unfocused
+   * window throttles rAF (~5 fps) without hiding the page. Resuming after a skip restarts the warm-up.
+   */
+  let watchdogPaused = true;
+  const feedWatchdog = (nowMs: number, drawing: boolean): void => {
+    if (!watchdog || !switchable || renderer.kind !== "3d") return;
+    if (!drawing || switchable.swapping || document.hidden || !document.hasFocus()) {
+      watchdogPaused = true;
+      return;
+    }
+    if (watchdogPaused) {
+      watchdogPaused = false;
+      watchdog.reset(nowMs);
+      return;
+    }
+    if (watchdog.sample(nowMs) === "degrade") degradeQuality();
+  };
+
+  // The only animation loop on the page: game logic, replay playback, one render, then the HUD.
+  const loop = createFrameLoop((deltaMS, nowMs) => {
+    fpsAcc += deltaMS;
     fpsFrames++;
     if (fpsAcc >= 1000) {
       fpsEl.textContent = `${Math.round((fpsFrames * 1000) / fpsAcc)} fps`;
       fpsAcc = 0;
       fpsFrames = 0;
     }
-
-    if (screen === "replay") {
-      // The score timer is paused here; the replay has its own hard cap back to the (unsaved) score
-      // screen, which then restarts its own auto-return timer.
-      if (performance.now() > replayDeadline) backToScore();
-      else if (replayEnded) backToScore();
-      return;
-    }
-    if (kiosk.enabled && screen === "attract" && !resetOpen && performance.now() - lastActivityMs > kiosk.attractIdleS * 1000) {
-      toIdle();
-      return;
-    }
-    if (screen === "idle") {
-      renderIdleSlide();
-      return;
-    }
-    if (screen === "score") {
-      const deadline = kiosk.enabled ? kioskScoreDeadline({ shownAtMs: scoreShownMs, savedAtMs, lastActivityMs }) : scoreDeadline;
-      const left = Math.max(0, Math.ceil((deadline - performance.now()) / 1000));
-      el<HTMLSpanElement>("returnIn").textContent = String(left);
-      if (left === 0) toAttract();
-      return;
-    }
-    if (screen !== "play" || !session || !current) return;
-
-    const world = session.world;
-    if (shouldAbortPlay(performance.now() - playStartedMs, session.state.outcome !== null, roundLimitS(world))) {
-      toAttract();
-      return;
-    }
-    const before = session.state.tick;
-    // Autopilot is consulted once per sim tick (frame-rate independent); humans per frame.
-    const human = pilot ? null : controls.read(scale, session.state.clutcher);
-    session.advance(ticker.deltaMS, pilot ?? human!);
-    const input = human ?? session.recording[session.recording.length - 1] ?? NO_INPUT;
-    const cd = session.countdown;
-    countdownEl.hidden = cd === 0;
-    el<HTMLDivElement>("countdownNum").textContent = String(cd);
-    const s = session.state;
-    const now = performance.now();
-    if (s.tick !== before) for (const shot of s.shots) tracers.push({ shot, untilMs: now + TRACER_MS });
-    tracers = tracers.filter((tr) => tr.untilMs > now);
-
-    // Autopilot input always carries a real aim; a human's only after the pointer touched the canvas.
-    drawDynamic(dyn, world, s, pilot || controls.hasAimed ? input.aim : null, tracers, now);
-    updateHud(world, s);
-    touchControls.setDefuseVisible(touchControls.visible && defuseAvailable(world, s));
-    if (s.outcome) toScore(s, current, session);
+    const played = step(deltaMS, nowMs);
+    replay?.update(deltaMS);
+    // The canvas is hidden on the attract and idle screens; the score screen keeps the last live frame.
+    const frames = screen === "replay" && replay ? replay.frames() : (screen === "play" || screen === "score") && lastLive ? [lastLive] : null;
+    feedWatchdog(nowMs, frames !== null);
+    if (frames) renderer.draw(frames);
+    if (played) updateHud(played.world, played.s);
   });
 
   if (import.meta.env.DEV) {
@@ -834,6 +927,13 @@ export async function startGame(): Promise<void> {
         shareUrl: () => shareUrl,
         challenge: () => pending?.challenge ?? null,
         kiosk: () => ({ ...kiosk, lastActivityMs, savedAtMs, idleSlide: screen === "idle" ? idleSlide : null }),
+        loseContext: (): boolean => {
+          if (renderer.kind !== "3d") return false;
+          const ext = renderer.canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context");
+          ext?.loseContext();
+          return ext != null;
+        },
+        quality: () => ({ tier, kind: renderer.kind }),
       },
     });
   }
@@ -845,31 +945,7 @@ export async function startGame(): Promise<void> {
   } else {
     toAttract();
   }
-}
-
-function drawDynamic(g: Graphics, world: World, s: SimState, aim: Vec2 | null, tracers: readonly Tracer[], nowMs: number): void {
-  g.clear();
-  const p = s.clutcher;
-  if (world.spike && clockAt(world, simTimeAt(world, s.tick)).spikeActive) {
-    const full = DEFUSE_S * TICK_HZ;
-    const enemyTicks = Math.max(0, ...s.enemies.filter((e) => e.alive).map((e) => e.defuseTicks));
-    drawSpike(g, world.spike, {
-      defuse: p.defuseTicks / full,
-      enemyDefuse: enemyTicks / full,
-      pulseT: prefersReducedMotion() ? null : nowMs / 1000,
-    });
-  }
-  for (const e of s.enemies) {
-    if (!e.alive) {
-      drawDown(g, e.x, e.y);
-      continue;
-    }
-    // Fog of war: only enemies in the clutcher's line of sight are drawn.
-    if (!segmentClear(world.map.walls, p, e)) continue;
-    drawEnemy(g, e);
-  }
-  drawPlayer(g, p, aim);
-  for (const { shot, untilMs } of tracers) drawTracer(g, shot, (untilMs - nowMs) / TRACER_MS + 0.3);
+  loop.start();
 }
 
 function updateHud(world: World, s: SimState): void {

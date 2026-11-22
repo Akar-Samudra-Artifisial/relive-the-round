@@ -3,22 +3,29 @@ import { DEFUSE_RADIUS } from "../sim/constants";
 import type { Vec2 } from "../sim/geom";
 import type { ShotEvent } from "../sim/sim";
 import { THEME_NUM } from "../ui/theme";
+import {
+  AIM_HALF,
+  AIM_LEN,
+  BODY_EDGE,
+  ENEMY_COLOR,
+  ENEMY_R,
+  ENEMY_TRACER,
+  PLAYER_COLOR,
+  PLAYER_R,
+  PLAYER_TRACER,
+  VIEW_HALF,
+  VIEW_LEN,
+} from "./actorStyle";
+import type { ActorView, DownView, FrameView, SpikeView } from "./renderer";
+
+export type { SpikeView };
+export { ENEMY_COLOR, PLAYER_COLOR };
 
 /**
  * Shared actor drawing for the live view and the replay (world units, one Graphics cleared per
- * frame). Glows are plain low-alpha shapes, no filters, so it stays cheap on phones.
+ * frame). Glows are plain low-alpha shapes, no filters, so it stays cheap on phones. Colours and
+ * sizes live in `actorStyle.ts`.
  */
-export const PLAYER_COLOR = THEME_NUM.cyan;
-export const ENEMY_COLOR = THEME_NUM.red;
-const PLAYER_TRACER = 0xc8f8ff;
-const ENEMY_TRACER = 0xff9a5c;
-const BODY_EDGE = THEME_NUM.text;
-const PLAYER_R = 120;
-const ENEMY_R = 110;
-const AIM_LEN = 1100;
-const AIM_HALF = 0.16;
-const VIEW_LEN = 520;
-const VIEW_HALF = 0.32;
 
 /** Filled circular sector (a view/aim cone) from `o` towards angle `a`. */
 function cone(g: Graphics, o: Vec2, a: number, half: number, len: number, color: number, alpha: number): void {
@@ -98,15 +105,6 @@ export function drawTracer(g: Graphics, shot: ShotEvent, fade = 1): void {
   }
 }
 
-export type SpikeView = {
-  /** Clutcher's defuse progress 0..1. */
-  readonly defuse: number;
-  /** Highest enemy defuse progress 0..1 (live view only). */
-  readonly enemyDefuse?: number;
-  /** Seconds, drives the pulse; pass null to keep it still (reduced motion). */
-  readonly pulseT: number | null;
-};
-
 /** Planted spike: defuse zone, optional pulse ring, diamond core and defuse progress arcs. */
 export function drawSpike(g: Graphics, sp: Vec2, v: SpikeView): void {
   g.circle(sp.x, sp.y, DEFUSE_RADIUS).fill({ color: THEME_NUM.red, alpha: 0.1 }).stroke({ width: 12, color: THEME_NUM.red, alpha: 0.7 });
@@ -124,4 +122,24 @@ export function drawSpike(g: Graphics, sp: Vec2, v: SpikeView): void {
   }
   if (v.defuse > 0) progressArc(g, sp, r, v.defuse, THEME_NUM.green, 46);
   else if ((v.enemyDefuse ?? 0) > 0) progressArc(g, sp, r, v.enemyDefuse!, THEME_NUM.red, 46);
+}
+
+/**
+ * One frame from renderer-neutral data: spike, then downs and enemies merged by `z` (stable,
+ * downs first on ties), then the player, then tracers. `g` is not cleared here.
+ */
+export function drawFrame(g: Graphics, f: FrameView): void {
+  if (f.spike) drawSpike(g, f.spike, f.spike);
+  const layered: ({ down: DownView } | { enemy: ActorView })[] = [
+    ...f.downs.map((down) => ({ down })),
+    ...f.enemies.map((enemy) => ({ enemy })),
+  ];
+  const z = (v: { down: DownView } | { enemy: ActorView }): number => ("down" in v ? v.down.z : v.enemy.z) ?? Infinity;
+  layered.sort((a, b) => z(a) - z(b) || 0);
+  for (const v of layered) {
+    if ("down" in v) drawDown(g, v.down.x, v.down.y, v.down.side === "player" ? PLAYER_COLOR : ENEMY_COLOR);
+    else drawEnemy(g, v.enemy);
+  }
+  if (f.player) drawPlayer(g, f.player, f.player.aim);
+  for (const t of f.tracers) drawTracer(g, t.shot, t.fade);
 }

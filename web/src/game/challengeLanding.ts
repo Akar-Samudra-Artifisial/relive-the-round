@@ -1,4 +1,4 @@
-import type { ReplaySpeed } from "./replayView";
+import type { ReplaySpeed } from "./replayPlayer";
 import { decodeChallenge, type Challenge } from "./share";
 
 /** What the kiosk does on load / hash change. */
