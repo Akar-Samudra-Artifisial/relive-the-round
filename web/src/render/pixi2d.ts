@@ -97,7 +97,7 @@ export class Pixi2dRenderer implements GameRenderer {
       if (!f) return;
       drawFrameUnder(under, f, { bodies: sprites === null, playerColor: color });
       sprites?.update(f, now, reduced, color);
-      drawTracers(over, f);
+      drawTracers(over, f, sprites?.muzzles ?? null);
     });
     this.app.render();
   }

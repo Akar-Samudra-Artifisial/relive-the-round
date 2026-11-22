@@ -122,6 +122,39 @@ Attempts and cost (actual `cost` returned by the API, USD): one attempt per asse
 | barrel | 0.0104 | 0.0253 | 0.0357 |
 | **Total** | 0.0416 | 0.1265 | **0.1681** |
 
+### Walk animation characters (CC0)
+
+`web/public/models/operator-rifle-rig.glb`, `enemy-rig.glb` and the sheets
+`web/public/sprites/operator-walk.webp`, `enemy-walk.webp` replace rigging our own Runware models.
+The static models and sprites above stay as the fallback.
+
+- Source: Quaternius "Toon Shooter Game Kit" (<https://quaternius.com/packs/toonshootergamekit.html>,
+  badge CC0, "free to use in personal and commercial projects"). The pack's Google Drive folder hit
+  its download quota, so the glTFs came from the Poly Pizza mirror (<https://poly.pizza/m/PpLF4rt4ah>
+  `Character Soldier` and <https://poly.pizza/m/mdGe4IN31v> `Character Enemy`, both "Public Domain
+  (CC0)"). No attribution required; credit: Quaternius.
+- Characters: player = `Character_Soldier` with the AK; enemy = `Character_Enemy` with the SMG.
+  Both share one 43-bone rig. Only `Character_Enemy` ships a plain `Walk`, so the soldier gets the
+  `Walk` and `Idle` tracks copied by bone name (inverse bind matrices are identical, rest pose copied
+  from the enemy file). Clips are renamed `walk` (1.0 s) and `idle` (1.67 s). Tracks are in place
+  (no Root/translation drift). The gun arm is not animated in `Walk`, so the rifle stays in the hand.
+- Processing (`<tmp>/tools/build.mjs`, `@gltf-transform/core` + `functions`, `meshoptimizer`, `sharp`):
+  rigid weapon/head/pad meshes are baked into the skinned mesh (weights 1.0 on the parent bone, vertex
+  = inverse-bind x local matrix); all flat materials become a 128x128 palette PNG (8 px cells,
+  nearest filter, one `Palette` material, UV at cell centres); `weld` + `simplify` (ratio 0.58
+  soldier, 0.72 enemy, error 0.01); weights u8-normalised, joints u8; `RootNode` scaled 0.82 so the
+  height is 1.8 and the feet sit at y=0. Facing +Z. No extensions.
+- Stats: operator-rifle-rig 4,030 tris, 243 KB; enemy-rig 4,032 tris, 189 KB. Each is one
+  SkinnedMesh with one material and 43 joints. Palette colours are the pack's own and fairly dark
+  (soldier olive 0.11/0.15/0.04 linear), so a role tint multiplies to a dark result; lift the texture
+  like `liftLevels` does for the sprites.
+- Sprite sheets: 768x768, 3x3 of 256 px cells, cell 0 = `idle`, cells 1..8 = `walk` at k/8 of the
+  duration. Same renderer as the static sprites (headless Chrome, three.js, ortho camera straight
+  above, material forced white). Lights ambient 0.9 + top directional 0.9, 0.8 cm/px, fixed
+  centre on the footprint of all nine frames, model +Z to image +X. WebP quality 90:
+  operator 18.8 KB, enemy 17.2 KB. From above the legs are mostly hidden under the body, so the
+  walk reads through the arm and shoulder swing.
+
 Licences (checked 2026-11-22):
 
 - TRELLIS.2: code and weights are MIT

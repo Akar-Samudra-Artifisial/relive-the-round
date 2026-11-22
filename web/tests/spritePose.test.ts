@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { FallSample, MotionSample } from "../src/render/actorMotion";
-import { DOWN_ALPHA, DOWN_DARK, downPose, liftLevels, newPose, scaleColor, SPRITE_BOB, SPRITE_CM_PER_PX, SPRITE_FLOOR, standingPose } from "../src/render/spritePose";
+import { DOWN_ALPHA, DOWN_DARK, downPose, liftLevels, newPose, OPERATOR_SIZE, operatorSize, scaleColor, SHEET_OPERATOR_SIZE, SPRITE_BOB, SPRITE_CM_PER_PX, SPRITE_FLOOR, standingPose, WALK_MIN_SPEED, walkFrame } from "../src/render/spritePose";
 
-const still: MotionSample = { heading: 1.2, speed01: 0, bob: 0, lean: 0 };
+const still: MotionSample = { heading: 1.2, speed01: 0, bob: 0, lean: 0, cycle: 0 };
 
 describe("spritePose", () => {
   it("scales colour channels", () => {
@@ -21,8 +21,8 @@ describe("spritePose", () => {
 
   it("bobs the scale ±SPRITE_BOB at a full run", () => {
     const out = newPose();
-    const low = standingPose(out, 0, 0, { heading: 0, speed01: 1, bob: 0, lean: 0 }, 0).scale;
-    const high = standingPose(out, 0, 0, { heading: 0, speed01: 1, bob: 1, lean: 0 }, 0).scale;
+    const low = standingPose(out, 0, 0, { heading: 0, speed01: 1, bob: 0, lean: 0, cycle: 0 }, 0).scale;
+    const high = standingPose(out, 0, 0, { heading: 0, speed01: 1, bob: 1, lean: 0, cycle: 0 }, 0).scale;
     expect(low).toBeCloseTo(SPRITE_CM_PER_PX * (1 - SPRITE_BOB), 9);
     expect(high).toBeCloseTo(SPRITE_CM_PER_PX * (1 + SPRITE_BOB), 9);
   });
@@ -57,5 +57,42 @@ describe("spritePose", () => {
     const px = new Uint8ClampedArray([10, 20, 30, 0]);
     liftLevels(px, SPRITE_FLOOR);
     expect([...px]).toEqual([10, 20, 30, 0]);
+  });
+});
+
+describe("operatorSize", () => {
+  it("keeps the static-sprite emphasis and uses the smaller one for a walk sheet", () => {
+    expect(operatorSize(1)).toBe(OPERATOR_SIZE);
+    expect(operatorSize(9)).toBe(SHEET_OPERATOR_SIZE);
+    expect(SHEET_OPERATOR_SIZE).toBeLessThan(OPERATOR_SIZE);
+  });
+});
+
+describe("walkFrame", () => {
+  it("is the idle cell below the walk speed or without walk cells", () => {
+    expect(walkFrame(0.5, 0, 8)).toBe(0);
+    expect(walkFrame(0.5, WALK_MIN_SPEED / 2, 8)).toBe(0);
+    expect(walkFrame(0.5, 1, 0)).toBe(0);
+  });
+
+  it("maps the cycle to cells 1..n", () => {
+    expect(walkFrame(0, 1, 8)).toBe(1);
+    expect(walkFrame(0.124, 0.5, 8)).toBe(1);
+    expect(walkFrame(0.125, 0.5, 8)).toBe(2);
+    expect(walkFrame(0.999, 1, 8)).toBe(8);
+    expect(walkFrame(1, 1, 8)).toBe(8);
+  });
+
+  it("drives the standing pose frame and turns the scale bob off with a sheet", () => {
+    const out = newPose();
+    const m = { heading: 0, speed01: 1, bob: 1, lean: 0, cycle: 0.5 };
+    const sheet = standingPose(out, 0, 0, m, 0, 1, 8);
+    expect(sheet.frame).toBe(5);
+    expect(sheet.scale).toBeCloseTo(SPRITE_CM_PER_PX, 9);
+    const plain = standingPose(out, 0, 0, m, 0);
+    expect(plain.frame).toBe(0);
+    expect(plain.scale).toBeCloseTo(SPRITE_CM_PER_PX * (1 + SPRITE_BOB), 9);
+    standingPose(out, 0, 0, m, 0, 1, 8);
+    expect(downPose(out, 0, 0, { fallT: 1, yaw: 0 }, 0).frame).toBe(0);
   });
 });

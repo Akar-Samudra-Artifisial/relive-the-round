@@ -3,6 +3,11 @@ export const TICK_HZ = 30;
 export const DT = 1 / TICK_HZ;
 /** Run speed in world units (cm) per second. */
 export const RUN_SPEED = 540;
+/**
+ * Live player (clutcher) run speed (cm/s), ~15% above RUN_SPEED so dodging feels responsive.
+ * Bots and the replay rails (PRO) keep RUN_SPEED.
+ */
+export const PLAYER_RUN_SPEED = 620;
 /** Navmesh cell size (cm). */
 export const NAV_CELL = 100;
 /** Agent clearance from walls (cm). Must be >= NAV_CELL * (sqrt(2)/2 + 1/16) so walkable cells never overlap walls. */

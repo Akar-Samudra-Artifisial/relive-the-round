@@ -16,6 +16,7 @@ import {
   VIEW_HALF,
   VIEW_LEN,
 } from "./actorStyle";
+import { CENTRE, type MuzzleSet, muzzlePoint, muzzleRole } from "./muzzle";
 import type { ActorView, DownView, FrameView, SpikeView } from "./renderer";
 
 export type { SpikeView };
@@ -109,12 +110,18 @@ export function drawDown(g: Graphics, x: number, y: number, color: number = ENEM
   g.stroke({ width: 22, color, alpha: 0.55 });
 }
 
-/** Shot tracer with a soft halo and a hit flash at the end; `fade` 1 → 0 over its lifetime. */
-export function drawTracer(g: Graphics, shot: ShotEvent, fade = 1): void {
+const tracerStart = { x: 0, y: 0 };
+
+/**
+ * Shot tracer with a soft halo and a hit flash at the end; `fade` 1 → 0 over its lifetime. It
+ * starts at the shooter's gun tip from `muzzles` (the character sprites), or at the body centre.
+ */
+export function drawTracer(g: Graphics, shot: ShotEvent, fade = 1, muzzles: MuzzleSet | null = null): void {
   const color = shot.by === "P0" ? PLAYER_TRACER : ENEMY_TRACER;
   const a = Math.max(0, Math.min(1, fade));
-  g.moveTo(shot.from.x, shot.from.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 44, color, alpha: 0.14 * a });
-  g.moveTo(shot.from.x, shot.from.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 12, color, alpha: 0.9 * a });
+  const s = muzzlePoint(shot.from, shot.to, muzzles ? muzzles[muzzleRole(shot.by)] : CENTRE, tracerStart);
+  g.moveTo(s.x, s.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 44, color, alpha: 0.14 * a });
+  g.moveTo(s.x, s.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 12, color, alpha: 0.9 * a });
   if (shot.hit) {
     g.circle(shot.to.x, shot.to.y, 150).fill({ color: 0xffffff, alpha: 0.18 * a });
     g.circle(shot.to.x, shot.to.y, 70).fill({ color, alpha: 0.75 * a });
@@ -149,9 +156,9 @@ export function drawFrame(g: Graphics, f: FrameView, opts: DrawOpts = {}): void 
   drawTracers(g, f);
 }
 
-/** Tracers only (drawn above the character sprites). */
-export function drawTracers(g: Graphics, f: FrameView): void {
-  for (const t of f.tracers) drawTracer(g, t.shot, t.fade);
+/** Tracers only (drawn above the character sprites, starting at their guns with `muzzles`). */
+export function drawTracers(g: Graphics, f: FrameView, muzzles: MuzzleSet | null = null): void {
+  for (const t of f.tracers) drawTracer(g, t.shot, t.fade, muzzles);
 }
 
 /**

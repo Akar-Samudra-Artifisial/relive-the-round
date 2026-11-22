@@ -30,6 +30,18 @@ export type ActorView = {
   readonly z?: number;
 };
 
+export type PlayerView = {
+  readonly x: number;
+  readonly y: number;
+  /** Aim point (live play): faces the body and draws the aim cone. */
+  readonly aim: Vec2 | null;
+  /**
+   * A point to face without an aim cone, used when `aim` is null (YOU replay: the target of the
+   * latest shot, so the gun points along its tracer).
+   */
+  readonly face?: Vec2;
+};
+
 export type DownView = {
   readonly x: number;
   readonly y: number;
@@ -45,7 +57,7 @@ export type TracerView = {
 
 export type FrameView = {
   /** The clutcher; null once dead in the replay panels (a player-side down stands in). */
-  readonly player: { readonly x: number; readonly y: number; readonly aim: Vec2 | null } | null;
+  readonly player: PlayerView | null;
   /** Living enemies, already fog-filtered. */
   readonly enemies: readonly ActorView[];
   readonly downs: readonly DownView[];

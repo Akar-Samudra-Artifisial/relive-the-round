@@ -64,7 +64,8 @@ function run(seed: number, inputs: readonly Input[]): string {
 // fields and the hash now covers the whole state (JSON form), so the same run hashes differently.
 // → "470ecce0" in the M3 fix round: enemy HP floor 100, rebalanced weapons, bot grace period,
 // hit reactions, simultaneous resolution, defuse mode + defuseTicks field on bots.
-const GOLDEN_HASH_SEED1234_900 = "470ecce0";
+// → "d6ac00b3" when the live player got its own run speed (PLAYER_RUN_SPEED 620 vs RUN_SPEED 540).
+const GOLDEN_HASH_SEED1234_900 = "d6ac00b3";
 
 describe("determinism", () => {
   const inputs = inputSequence(900);

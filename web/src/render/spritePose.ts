@@ -18,6 +18,13 @@ export const DOWN_DARK = 0.4;
  * much larger so YOU is at least as easy to spot as an enemy.
  */
 export const OPERATOR_SIZE = 1.35;
+/** The same for the walk sheets: both share one body, so only a slight emphasis. */
+export const SHEET_OPERATOR_SIZE = 1.1;
+
+/** Clutcher sprite size for a role with `frameCount` frames (> 1: a walk sheet). */
+export function operatorSize(frameCount: number): number {
+  return frameCount > 1 ? SHEET_OPERATOR_SIZE : OPERATOR_SIZE;
+}
 /** Darkest grey a sprite pixel may have after `liftLevels` (0..1), so tints stay saturated. */
 export const SPRITE_FLOOR = 0.62;
 
@@ -48,7 +55,20 @@ export function liftLevels(data: Uint8ClampedArray, floor: number = SPRITE_FLOOR
   }
 }
 
-export type SpritePose = { x: number; y: number; rotation: number; scale: number; tint: number; alpha: number };
+/** Below this speed01 a walk sheet shows its idle cell. */
+export const WALK_MIN_SPEED = 0.08;
+
+/**
+ * Cell of a walk sheet for `cycle` (0..1) and `speed01`: 0 (idle) when slower than WALK_MIN_SPEED
+ * or without walk cells, else 1..n (cell 1 at the cycle start).
+ */
+export function walkFrame(cycle: number, speed01: number, n: number): number {
+  if (n <= 0 || speed01 < WALK_MIN_SPEED) return 0;
+  return 1 + Math.min(n - 1, Math.max(0, Math.floor(cycle * n)));
+}
+
+/** `frame` is the sheet cell: 0 = idle (or the static sprite), 1..n = walk cells. */
+export type SpritePose = { x: number; y: number; rotation: number; scale: number; tint: number; alpha: number; frame: number };
 
 /** `color` with each channel multiplied by k (0..1). */
 export function scaleColor(color: number, k: number): number {
@@ -56,14 +76,18 @@ export function scaleColor(color: number, k: number): number {
   return (c(16) | c(8) | c(0)) >>> 0;
 }
 
-/** Writes a standing actor's pose into `out` (no allocation) and returns it. */
-export function standingPose(out: SpritePose, x: number, y: number, m: MotionSample, color: number, size = 1): SpritePose {
+/**
+ * Writes a standing actor's pose into `out` (no allocation) and returns it. `walkCells` > 0: a
+ * walk sheet is active, so the legs animate via `frame` and the scale bob is off.
+ */
+export function standingPose(out: SpritePose, x: number, y: number, m: MotionSample, color: number, size = 1, walkCells = 0): SpritePose {
   out.x = x;
   out.y = y;
   // Pixi and the world share y-down axes, so the world heading is the sprite rotation.
   out.rotation = m.heading;
+  out.frame = walkFrame(m.cycle, m.speed01, walkCells);
   // bob is in 0..speed01, so this swings ±SPRITE_BOB at a full run and is exactly 1 at rest.
-  out.scale = SPRITE_CM_PER_PX * size * (1 + SPRITE_BOB * (2 * m.bob - m.speed01));
+  out.scale = SPRITE_CM_PER_PX * size * (walkCells > 0 ? 1 : 1 + SPRITE_BOB * (2 * m.bob - m.speed01));
   out.tint = color;
   out.alpha = 1;
   return out;
@@ -74,6 +98,7 @@ export function downPose(out: SpritePose, x: number, y: number, f: FallSample, c
   out.x = x;
   out.y = y;
   out.rotation = f.yaw;
+  out.frame = 0;
   out.scale = SPRITE_CM_PER_PX * size;
   out.tint = scaleColor(color, 1 - (1 - DOWN_DARK) * f.fallT);
   out.alpha = 1 - (1 - DOWN_ALPHA) * f.fallT;
@@ -81,5 +106,5 @@ export function downPose(out: SpritePose, x: number, y: number, f: FallSample, c
 }
 
 export function newPose(): SpritePose {
-  return { x: 0, y: 0, rotation: 0, scale: SPRITE_CM_PER_PX, tint: 0xffffff, alpha: 1 };
+  return { x: 0, y: 0, rotation: 0, scale: SPRITE_CM_PER_PX, tint: 0xffffff, alpha: 1, frame: 0 };
 }

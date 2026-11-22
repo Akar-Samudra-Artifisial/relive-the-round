@@ -1,4 +1,4 @@
-import { RUN_SPEED } from "../sim/constants";
+import { PLAYER_RUN_SPEED, RUN_SPEED } from "../sim/constants";
 
 /**
  * Procedural actor motion shared by the 2D sprites and the 3D models. Pure: no renderer libs, DOM
@@ -18,8 +18,15 @@ export const FALL_MS = 400;
 export const LEAN_MAX = 0.12;
 /** Distance (cm) per footstep: one |sin| bob period. */
 export const STRIDE_CM = 120;
-/** A position jump beyond max(JUMP_FACTOR × RUN_SPEED × dt, JUMP_MIN_CM) resets the actor. */
+/**
+ * Distance (cm) per walk-animation cycle (two footsteps). Equals 2 × STEP_CM of the footstep sound
+ * (asserted in actorMotion.test.ts) so the legs land in step with the audio.
+ */
+export const WALK_CYCLE_CM = 380;
+/** A position jump beyond max(JUMP_FACTOR × MAX_SPEED × dt, JUMP_MIN_CM) resets the actor. */
 const JUMP_FACTOR = 3;
+/** Fastest legitimate actor speed (cm/s): the live player outruns bots and replay rails. */
+const MAX_SPEED = Math.max(RUN_SPEED, PLAYER_RUN_SPEED);
 const JUMP_MIN_CM = 150;
 /** Smoothing time constants (ms). */
 const SPEED_TAU = 120;
@@ -30,12 +37,17 @@ const MOVE_EPS = 1;
 export type MotionSample = {
   /** World heading (rad): facing/aim when known, else movement direction, else the last heading. */
   readonly heading: number;
-  /** Smoothed speed as a fraction of RUN_SPEED, 0..1. */
+  /** Smoothed speed as a fraction of RUN_SPEED, clamped to 0..1 (the faster player saturates at 1). */
   readonly speed01: number;
   /** Footstep bob 0..1 (|sin| of the stride phase × speed01); 0 with reduced motion. */
   readonly bob: number;
   /** Forward lean (rad), 0..LEAN_MAX; 0 with reduced motion. */
   readonly lean: number;
+  /**
+   * Walk-cycle phase 0..1, advanced by distance travelled (one cycle per WALK_CYCLE_CM). Frozen
+   * while the actor does not move (a paused replay); 0 after a reset and with reduced motion.
+   */
+  readonly cycle: number;
 };
 
 export type FallSample = {
@@ -50,6 +62,7 @@ type ActorState = {
   speed01: number;
   bob: number;
   lean: number;
+  cycle: number;
   x: number;
   y: number;
   speed: number;
@@ -68,6 +81,30 @@ export function angleDelta(a: number, b: number): number {
   if (d > Math.PI) d -= TAU;
   else if (d <= -Math.PI) d += TAU;
   return d;
+}
+
+const faceOut = { x: 0, y: 0 };
+
+/**
+ * The clutcher's facing vector for `MotionTracker.actor`: the aim (dx, dy) when `hasAim`, else the
+ * direction to `p.face` (replay: the latest shot's target), else undefined (movement heading).
+ * The returned object is reused; read it before the next call.
+ */
+export function facing(
+  p: { readonly x: number; readonly y: number; readonly face?: { readonly x: number; readonly y: number } },
+  hasAim: boolean,
+  dx: number,
+  dy: number,
+): { x: number; y: number } | undefined {
+  if (hasAim) {
+    faceOut.x = dx;
+    faceOut.y = dy;
+    return faceOut;
+  }
+  if (!p.face || (p.face.x === p.x && p.face.y === p.y)) return undefined;
+  faceOut.x = p.face.x - p.x;
+  faceOut.y = p.face.y - p.y;
+  return faceOut;
 }
 
 /** Deterministic yaw in [0, 2π) from a position. */
@@ -123,7 +160,7 @@ export class MotionTracker {
     const hasFacing = fx !== undefined && fy !== undefined && (fx !== 0 || fy !== 0);
     let s = this.actors.get(key);
     if (!s) {
-      s = { heading: hasFacing ? Math.atan2(fy!, fx!) : 0, speed01: 0, bob: 0, lean: 0, x, y, speed: 0, phase: 0, lastMs: now, seen: 0 };
+      s = { heading: hasFacing ? Math.atan2(fy!, fx!) : 0, speed01: 0, bob: 0, lean: 0, cycle: 0, x, y, speed: 0, phase: 0, lastMs: now, seen: 0 };
       this.actors.set(key, s);
     }
     // Missed a frame (hidden, e.g. fog) → treat as a fresh appearance.
@@ -131,12 +168,13 @@ export class MotionTracker {
     s.seen = this.frame;
     const dt = now - s.lastMs;
     const dist = Math.hypot(x - s.x, y - s.y);
-    const jump = dist > Math.max((JUMP_FACTOR * RUN_SPEED * Math.max(dt, 0)) / 1000, JUMP_MIN_CM);
+    const jump = dist > Math.max((JUMP_FACTOR * MAX_SPEED * Math.max(dt, 0)) / 1000, JUMP_MIN_CM);
     if (fresh || jump || dt <= 0) {
       // Reset on a fresh appearance or a teleport; a repeated timestamp only takes the position.
       if (fresh || jump) {
         s.speed = 0;
         s.phase = 0;
+        s.cycle = 0;
         s.lastMs = now;
       }
       s.x = x;
@@ -148,6 +186,7 @@ export class MotionTracker {
     s.speed += (inst - s.speed) * (1 - Math.exp(-dt / SPEED_TAU));
     s.phase += (dist / STRIDE_CM) * Math.PI;
     if (s.phase > TAU * 64) s.phase -= TAU * 64;
+    s.cycle = this.reduced ? 0 : (s.cycle + dist / WALK_CYCLE_CM) % 1;
     if (hasFacing) {
       s.heading = Math.atan2(fy!, fx!);
     } else if (dist > MOVE_EPS) {
@@ -189,6 +228,7 @@ export class MotionTracker {
     if (s.speed01 < 0.02) s.speed01 = 0;
     s.bob = this.reduced ? 0 : Math.abs(Math.sin(s.phase)) * s.speed01;
     s.lean = this.reduced ? 0 : LEAN_MAX * s.speed01;
+    if (this.reduced) s.cycle = 0;
     return s;
   }
 }

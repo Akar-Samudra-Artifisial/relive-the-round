@@ -14,7 +14,7 @@ import { ensureFonts, prefersReducedMotion } from "../ui/fonts";
 import { clockAt, NO_INPUT, simTimeAt, type Input, type SimState } from "../sim/sim";
 import { buildWorld, type World } from "../sim/world";
 import { createAutopilot, type Autopilot } from "./autopilot";
-import { qrMatrix, renderCard, type QrMatrix } from "./cardImage";
+import { drawQr, qrMatrix, renderCard, type QrMatrix } from "./cardImage";
 import { challengeLines, landingAction, replayKeyAction } from "./challengeLanding";
 import { createFrameLoop } from "./frameLoop";
 import { liveFrame, TRACER_MS, type LiveTracer } from "./frameView";
@@ -56,21 +56,17 @@ function isControl(t: EventTarget | null): boolean {
   return t instanceof HTMLButtonElement || t instanceof HTMLInputElement;
 }
 
-/** Paints a QR matrix (with a 4-module quiet zone) onto a small canvas, whole pixels per module. */
+/**
+ * Paints a QR matrix filling the canvas's content box (its CSS padding is the outer quiet zone).
+ * The backing store matches the displayed device pixels, so modules stay sharp without scaling.
+ */
 function paintQr(canvas: HTMLCanvasElement, m: QrMatrix): void {
+  const css = getComputedStyle(canvas);
+  const content = parseFloat(css.width) - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+  const side = Math.max(m.length, Math.round((content > 0 ? content : canvas.width) * (window.devicePixelRatio || 1)));
+  canvas.width = canvas.height = side;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const n = m.length + 8;
-  const cell = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / n));
-  const off = Math.floor((canvas.width - cell * n) / 2);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#000000";
-  m.forEach((row, r) =>
-    row.forEach((dark, c) => {
-      if (dark) ctx.fillRect(off + (c + 4) * cell, off + (r + 4) * cell, cell, cell);
-    }),
-  );
+  if (ctx) drawQr(ctx, m, 0, 0, side);
 }
 
 const REASON_TEXT: Record<ScoreCard["reason"], string> = {

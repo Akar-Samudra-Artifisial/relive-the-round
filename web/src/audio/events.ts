@@ -1,4 +1,4 @@
-import { DEFUSE_S, DT, RUN_SPEED, TICK_HZ } from "../sim/constants";
+import { DEFUSE_S, DT, PLAYER_RUN_SPEED, RUN_SPEED, TICK_HZ } from "../sim/constants";
 import type { SimState, SimStats } from "../sim/sim";
 
 /**
@@ -162,7 +162,7 @@ export function track(prev: Tracker | null, snap: PlaySnapshot): { next: Tracker
   repeat(d("kills"), { kind: "kill" }, events);
   if (d("damageTaken") > 0 && me.hp > 0) events.push({ kind: "hurt" });
 
-  const maxCm = RUN_SPEED * DT * ticks * 1.5;
+  const maxCm = Math.max(RUN_SPEED, PLAYER_RUN_SPEED) * DT * ticks * 1.5;
   const pw = walk(prev.player, me.x, me.y, maxCm);
   if (pw.step) events.push({ kind: "step", enemy: false, gain: 1, pan: 0 });
   const enemies = s.enemies.map((e, i): Walker | null => {

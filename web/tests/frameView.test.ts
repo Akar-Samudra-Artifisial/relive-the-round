@@ -145,7 +145,9 @@ describe("youFrame", () => {
       expect(f.enemies.length + f.downs.length).toBe(s.enemies.length + (s.clutcher.hp > 0 ? 0 : 1));
       expect(f.enemies.length).toBe(s.enemies.filter((e) => e.alive).length);
       for (const e of f.enemies) expect(e).toMatchObject({ x: s.enemies[e.z!]!.x, y: s.enemies[e.z!]!.y, fx: s.enemies[e.z!]!.fx });
-      if (f.player) expect(f.player).toEqual({ x: s.clutcher.x, y: s.clutcher.y, aim: null });
+      // No aim cone; the body faces the target of the latest own shot still drawn as a tracer.
+      const own = f.tracers.filter((tr) => tr.shot.by === "P0").at(-1);
+      if (f.player) expect(f.player).toEqual({ x: s.clutcher.x, y: s.clutcher.y, aim: null, ...(own ? { face: own.shot.to } : {}) });
       expect(zOrdered(f)).toBe(true);
       if (f.spike) {
         expect(f.spike).toEqual({ x: world.spike!.x, y: world.spike!.y, defuse: s.clutcher.defuseTicks / FULL, pulseT: null });

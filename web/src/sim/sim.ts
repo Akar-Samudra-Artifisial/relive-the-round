@@ -23,6 +23,7 @@ import {
   REACTION_MAX_S,
   REACTION_MIN_S,
   RETAKE_MARGIN_S,
+  PLAYER_RUN_SPEED,
   RUN_SPEED,
   SPIKE_TIMER_S,
   SPREAD_MOVING,
@@ -121,6 +122,7 @@ const DEFUSE_TICKS = Math.round(DEFUSE_S * TICK_HZ);
 export const BOT_GRACE_TICKS = Math.round(BOT_GRACE_S * TICK_HZ);
 const REPATH_TICKS = 15;
 const STEP_LEN = RUN_SPEED * DT;
+const PLAYER_STEP_LEN = PLAYER_RUN_SPEED * DT;
 
 /** Level-time (s) at a given tick; level samples start at the first clutcher sample. */
 export function simTimeAt(world: World, tick: number): number {
@@ -257,8 +259,8 @@ function stepClutcher(world: World, s: SimState, input: Input, ctx: Ctx) {
   let x = c.x;
   let y = c.y;
   // Axis-separated slide against non-walkable cells.
-  if (mx !== 0 && isWalkable(world.nav, { x: x + mx * STEP_LEN, y })) x += mx * STEP_LEN;
-  if (my !== 0 && isWalkable(world.nav, { x, y: y + my * STEP_LEN })) y += my * STEP_LEN;
+  if (mx !== 0 && isWalkable(world.nav, { x: x + mx * PLAYER_STEP_LEN, y })) x += mx * PLAYER_STEP_LEN;
+  if (my !== 0 && isWalkable(world.nav, { x, y: y + my * PLAYER_STEP_LEN })) y += my * PLAYER_STEP_LEN;
   const moving = x !== c.x || y !== c.y;
 
   let fireCd = Math.max(0, c.fireCd - 1);
