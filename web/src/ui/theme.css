@@ -609,6 +609,9 @@ kbd {
 #muteToggle .spk { fill: currentColor; }
 #muteToggle .cross, #muteToggle[aria-pressed="true"] .waves { display: none; }
 #muteToggle[aria-pressed="true"] .cross { display: inline; }
+/* Keyboard hint keycap under the button (outside it: the button's clip-path would cut it); hidden in touch mode. */
+#game #muteKey { position: fixed; top: calc(var(--s-2) + 40px + var(--s-1)); right: calc(var(--s-2) + 20px); z-index: 5; transform: translateX(50%); min-width: 0; padding: 0 5px; color: var(--text-dim); line-height: 1.4; pointer-events: none; }
+#game[data-touch="1"] #muteKey { display: none; }
 /* The play HUD spans the width on narrow screens: keep the button's corner free on both sides. */
 @media (max-width: 1080px) {
   #game[data-screen="play"] #hud { width: min(100% - 2 * var(--s-3) - 2 * 48px, 960px); }

@@ -24,6 +24,7 @@ Semua perubahan penting dicatat di sini. Format mengikuti Keep a Changelog, vers
 - Booth kiosk mode (`?kiosk=1`, optional `&idle=<s>`, 10–600 s, default 60 s): after initials are saved the score screen returns to the level select after 15 s without input (hard cap 60 s); an untouched level select switches to an attract loop (featured rounds + top scores) whose first key/click only dismisses it; "Download card" is hidden and `#c=` challenge links are ignored (the QR stays); the operator can clear the local leaderboard with Ctrl+Shift+Alt+R or 5 quick taps in the top-left corner, followed by an in-page confirm. Normal mode and gameplay rules are unchanged.
 
 ### Changed
+- The mute button now shows a small `M` keycap under it, so the keyboard shortcut is visible without hovering; it is hidden in touch mode.
 - The player now runs about 15% faster (620 cm/s instead of 540 cm/s, `PLAYER_RUN_SPEED`) so dodging feels less sluggish; bots and the PRO replay keep 540 cm/s. Autopilot balance stays within the 25–65% target (level `010a7b04f8c3` moved from 60% to 44%).
 - In the two-panel replay the PRO clutcher's body (glow, aim and player-side downs) is amber, matching the PRO panel accent; it was cyan in both panels.
 - The 3D renderer is now the default when WebGL2 is available; `?2d=1` (or `?3d=0`) forces the Pixi 2D renderer, and browsers without WebGL2 keep 2D silently.
