@@ -596,17 +596,22 @@ page wiring). three stays in the lazy chunks. `verify-dist: OK`.
   in the replay. Screenshots: `docs/ai-showcase/14-3d-phase-7/quality-{high,low}.png`.
 - Watchdog under 6× CPU throttling: `quality high -> medium`, `medium -> low`, then
   `falling back to 2D: low fps`. Without throttling: no step during a round, tier stays high 16 s.
-- Tab switch on `/?fps`: not verifiable with the agent browser (Dia over CDP). Its background tab
-  reports `document.hidden = false` and `hasFocus() = true` with no blur / visibilitychange, while
-  rAF slows to ~5 fps (150–500 ms gaps, under the 1 s pause threshold), so the watchdog steps down
-  exactly as it would on a genuinely slow device. A real hidden tab sets `document.hidden`, which
-  pauses the watchdog (`gamePage.ts` `feedWatchdog`). Still needs a manual check in a normal browser.
+- Tab switch on `/?fps`: the agent browser (Dia over CDP) can't hide a tab (its background tab
+  reports `document.hidden = false` and `hasFocus() = true` while rAF slows to ~5 fps, so the
+  watchdog steps down as on a genuinely slow device). Re-run with a scripted headed Chrome over raw
+  CDP (Playwright forces `document.hidden = false`): on the paused replay (which keeps feeding the
+  watchdog), a second tab brought to the front made the game tab `hidden = true`,
+  `visibilityState = "hidden"`, unfocused for ~11.5 s. Tier and kind before, at +1.5 s and +11.5 s
+  hidden, and 10 s after returning: `high` / `3d` every time, so no step and no fallback. Screenshot:
+  `docs/ai-showcase/14-3d-phase-7/tab-switch.png`.
 - `__rtr.loseContext()` on the replay screen: one `[3d] falling back to 2D: WebGL context lost`
   warn, YOU / PRO panels shown, pause, scrub and 2× speed work, no uncaught errors (three also logs
   "WEBGL_lose_context extension not supported" after the loss). Mid-round (`/?level=0`): one warn,
-  the round continues in 2D to a normal score card. Aim after the fallback was not verified:
-  synthetic pointer events fire no shot in either renderer. Screenshots:
-  `docs/ai-showcase/14-3d-phase-7/fallback-{replay,round}.png`.
+  the round continues in 2D to a normal score card. Aim after the fallback, with trusted CDP mouse
+  input in a scripted headed Chrome: 1 shot in 3D before the loss, `loseContext()` logs the
+  fallback exactly once, then shots keep firing in 2D (9 shots, 20 fire events at 11 different
+  angles, so aim follows the mouse), the round reaches the score card, no page errors. Screenshots:
+  `docs/ai-showcase/14-3d-phase-7/fallback-{replay,round}.png`, `aim-after-loss.png`.
 
 ## Phase 8 — 3D by default
 
