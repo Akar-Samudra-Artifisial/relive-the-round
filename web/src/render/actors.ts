@@ -3,25 +3,29 @@ import { DEFUSE_RADIUS } from "../sim/constants";
 import type { Vec2 } from "../sim/geom";
 import type { ShotEvent } from "../sim/sim";
 import { THEME_NUM } from "../ui/theme";
+import {
+  AIM_HALF,
+  AIM_LEN,
+  BODY_EDGE,
+  ENEMY_COLOR,
+  ENEMY_R,
+  ENEMY_TRACER,
+  PLAYER_COLOR,
+  PLAYER_R,
+  PLAYER_TRACER,
+  VIEW_HALF,
+  VIEW_LEN,
+} from "./actorStyle";
 import type { ActorView, DownView, FrameView, SpikeView } from "./renderer";
 
 export type { SpikeView };
+export { ENEMY_COLOR, PLAYER_COLOR };
 
 /**
  * Shared actor drawing for the live view and the replay (world units, one Graphics cleared per
- * frame). Glows are plain low-alpha shapes, no filters, so it stays cheap on phones.
+ * frame). Glows are plain low-alpha shapes, no filters, so it stays cheap on phones. Colours and
+ * sizes live in `actorStyle.ts`.
  */
-export const PLAYER_COLOR = THEME_NUM.cyan;
-export const ENEMY_COLOR = THEME_NUM.red;
-const PLAYER_TRACER = 0xc8f8ff;
-const ENEMY_TRACER = 0xff9a5c;
-const BODY_EDGE = THEME_NUM.text;
-const PLAYER_R = 120;
-const ENEMY_R = 110;
-const AIM_LEN = 1100;
-const AIM_HALF = 0.16;
-const VIEW_LEN = 520;
-const VIEW_HALF = 0.32;
 
 /** Filled circular sector (a view/aim cone) from `o` towards angle `a`. */
 function cone(g: Graphics, o: Vec2, a: number, half: number, len: number, color: number, alpha: number): void {

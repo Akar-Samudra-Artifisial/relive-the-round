@@ -57,20 +57,29 @@ describe("3D map scene", () => {
     expect(box.max.y).toBeCloseTo(WALL_HEIGHT, 3);
   });
 
-  it("maps world (x, y) to (x, *, y), not mirrored", () => {
-    const i = map.walls.findIndex((p) => p[1] !== 0);
-    const poly = map.walls[i]!;
-    const [x, y] = [poly[0]!, poly[1]!];
-    const pos = all<THREE.Mesh>(scene, "wall")[i]!.geometry.getAttribute("position");
-    let hit = false;
-    let mirrored = false;
-    for (let k = 0; k < pos.count; k++) {
-      if (Math.abs(pos.getX(k) - x) > 1e-3) continue;
-      if (Math.abs(pos.getZ(k) - y) < 1e-3) hit = true;
-      if (Math.abs(pos.getZ(k) + y) < 1e-3) mirrored = true;
-    }
-    expect(hit).toBe(true);
-    expect(mirrored).toBe(false);
+  it("maps world (x, y) to (x, *, y), not mirrored, for every wall vertex", () => {
+    const walls = all<THREE.Mesh>(scene, "wall");
+    const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-3;
+    map.walls.forEach((poly, i) => {
+      const pos = walls[i]!.geometry.getAttribute("position");
+      const pts: [number, number][] = [];
+      for (let j = 0; j + 1 < poly.length; j += 2) pts.push([poly[j]!, poly[j + 1]!]);
+      const isPoint = (x: number, z: number): boolean => pts.some(([px, py]) => near(px, x) && near(py, z));
+      for (const [x, y] of pts) {
+        let hit = false;
+        let mirrored = false;
+        for (let k = 0; k < pos.count; k++) {
+          if (!near(pos.getX(k), x)) continue;
+          if (near(pos.getZ(k), y)) hit = true;
+          else if (near(pos.getZ(k), -y) && !isPoint(x, -y)) mirrored = true;
+        }
+        expect(hit, `wall ${i} vertex (${x}, ${y})`).toBe(true);
+        expect(mirrored, `wall ${i} vertex (${x}, ${y}) mirrored`).toBe(false);
+      }
+      for (let k = 0; k < pos.count; k++) {
+        expect(isPoint(pos.getX(k), pos.getZ(k)), `wall ${i} geometry vertex ${k}`).toBe(true);
+      }
+    });
     // Every wall stays inside the map footprint on X/Z.
     const box = new THREE.Box3();
     for (const w of all<THREE.Mesh>(scene, "wall")) box.union(bbox(w));

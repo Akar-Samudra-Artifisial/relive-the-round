@@ -288,8 +288,8 @@ A three.js `GameRenderer` that draws the static map with the phase 3 camera. It 
   so the grid, outlines, brackets and wall edges are thin. The 2D 70 cm cyan wall halo is left out
   (the cyan edges stand in for it). Walls are lit, so their faces are a little lighter or darker
   than `WALL_FILL`.
-- Still missing: actors, tracers and the spike (phase 5); the side-by-side replay panels (phase 6,
-  the replay shows panels[0] only); shadows (phase 7).
+- Still missing after phase 4: actors, tracers and the spike (done in phase 5, below); the
+  side-by-side replay panels (phase 6, the replay shows panels[0] only); shadows (phase 7).
 - Checks (headless Chrome, 1280x800, `pnpm dev`):
   - `/?auto&seed=42` (2D) and `/?3d=1&auto&seed=42` (3D, canvas `data-engine="three.js r187"`)
     give the same score card: 500 points, 3.7 s / 6.0 s, 2 / 3 kills, tick 111. The 3D run logs no
@@ -299,3 +299,114 @@ A three.js `GameRenderer` that draws the static map with the phase 3 camera. It 
   - Fallback: `--disable-webgl2` plays in 2D with no warning; a blocked `three3d.ts` request and a
     `getContext("webgl2")` that fails for the renderer both log the one warn and play in 2D (the
     second also prints three's own context error).
+
+## Phase 5 — actors
+
+The 3D renderer now draws the dynamic part of each `FrameView`: player, enemies, downs, aim and
+view cones, tracers, and the spike with its pulse and defuse ring. A whole round plays with
+`?3d=1`. The 2D path is unchanged.
+
+- `web/src/render/actorStyle.ts` (pure, only imports `ui/theme`; in the purity guard):
+  `PLAYER_COLOR`, `ENEMY_COLOR`, the tracer colours, `BODY_EDGE`, `PLAYER_R`/`ENEMY_R`, and the
+  aim and view cone sizes moved out of `actors.ts`. `actors.ts` imports them and re-exports the two
+  colours, so its drawing code and output are unchanged.
+  - **Cone parity note:** the drawn view cone (520 cm, half-angle 0.32 rad) is a facing hint. It
+    intentionally differs from the sim's `FOV_COS` / `VIEW_RANGE`; visual parity with 2D wins.
+- `web/src/render/three3d/actorScene.ts`: `ActorLayer { group, update(frame | null, nowMs),
+  dispose() }`. It has no renderer and no DOM. It draws only what the frame contains: fog is
+  already applied in `liveFrame`, and pulse and fade come from the frame (`nowMs` is reserved).
+- `Three3dRenderer` creates one layer in its constructor and adds its group to the scene. `draw`
+  calls `update(frames[0] ?? null, performance.now())` and then renders. `loadMap` leaves the layer
+  alone, and `destroy` removes and disposes it. `gamePage.ts`, `frameView.ts` and the sim are
+  untouched.
+
+**Layering.** World (x, y) maps to (X = x, Y, Z = y), as for the map.
+
+| Piece | Y (cm) | renderOrder | Material |
+| --- | --- | ---: | --- |
+| Spike zone, outline, pulse or still ring, track, progress | 4.0–4.4 | 6 | basic, transparent |
+| Downs: ring and X | 4.8–4.85 | 7 | basic, transparent |
+| Enemy glow, view cone, facing tick | 5.0–5.4 | 7 | basic, transparent |
+| Player glow, aim cone, aim line, nose | 5.6–6.0 | 8 | basic, transparent |
+| Bodies (cylinders from Y 0: player r 120 / h 160, enemy r 110 / h 150), spike octahedron at Y 130 | — | 0 | Lambert, opaque |
+| Tracers (boxes at Y 120, halo 44 / core 12) and hit discs | 120 | 9 | basic, transparent |
+
+- Ground decals sit above the map layers (Y 0–3, renderOrder ≤ 5). They use `depthWrite: false`
+  and `depthTest: true`, so walls hide them, and their heights follow the 2D draw order. Bodies
+  depth-test and depth-write normally, so walls hide enemies behind them. Tracers depth-test but do
+  not write depth.
+- All widths are meshes (strips, rings, boxes), never WebGL lines, which are always 1 px. The only
+  line is the octahedron's amber edge.
+
+**Pooling rule.** Every geometry and material is created in the constructor and registered in a
+set; `dispose()` frees that set.
+
+- Pools: enemies 5, downs 6, tracers 24. A pool grows only when a frame needs more slots than it
+  has ever had. That is the only allocation path.
+- `update` only toggles `visible` and sets position, `rotation.y`, scale, opacity, colour and the
+  draw range. Downs swap between shared per-side materials.
+- Each tracer slot owns its four materials (per-shot colour and fade).
+- The pulse ring is a pre-built `RingGeometry` whose inner and outer vertex rows are rewritten in
+  place each frame. This keeps the 16 cm stroke, which scaling would widen.
+- `actorScene.test.ts` checks this two ways across 50 changing frames: the `BufferGeometry` and
+  `Material` id counters advance by exactly one probe each, and the set of uuids in the group does
+  not change.
+
+**Angle mapping.** A world heading a = atan2(dy, dx) becomes `rotation.y = -a`.
+
+- Rotating about Y by θ maps local +X to (cos θ, 0, −sin θ). With θ = −a that is (cos a, 0, sin a),
+  which is world (cos a, sin a), because world +y is +Z.
+- Flat circles and rings are built in XY and turned by `rotateX(+π/2)`, which maps (x, y, 0) to
+  (x, 0, y). This keeps world angles (no mirror), unlike the map's `rotateX(−π/2)` shapes.
+- The test checks that a facing (0, 1) sends local +X to +Z and an aim (1, 0) sends it to +X. It
+  uses `applyQuaternion`, not camMath.
+
+**Progress ring.**
+
+- It is a `RingGeometry(r − 23, r + 23, 64, 1, −π/2, 2π)` with r = `DEFUSE_RADIUS + 110`.
+- Theta grows with the world angle from world −y, which is 12 o'clock and runs clockwise on screen.
+- With `phiSegments = 1` each theta segment is 6 indices, so progress is
+  `setDrawRange(0, 6 · round(clamp(frac) · 64))`.
+- There are two meshes on that geometry: green for own defuse and red for enemy defuse (shown only
+  while own defuse is 0), the same rule as `drawSpike`. A grey `surfaceHi` track shows while either
+  side has progress.
+
+**Parity differences (3D vs. 2D):**
+
+- Bodies are lit Lambert cylinders, so they look a little lighter or darker than the flat 2D
+  colour. The 2D body rims are left out.
+- The 2D `z` merge of downs and enemies is dropped, because depth handles overlap in 3D.
+- Hit discs lie flat at tracer height.
+- The diamond is an octahedron hovering at Y 130.
+
+**Chunks** after `pnpm -C web build:public` (gzip = `gzip -9`):
+
+| Chunk | Raw bytes | Gzip bytes |
+| --- | ---: | ---: |
+| `index-*.js` (entry) | 402,245 | 123,027 |
+| `three3d-*.js` (renderer, map, actors, labels, camera math) | 15,482 | 6,180 |
+| `three.module-*.js` | 570,126 | 140,621 |
+
+The entry grows by +40 B raw / +13 B gzip over phase 4: only the constants moved into
+`actorStyle.ts`. three stays in the lazy chunks. `verify-dist: OK`.
+
+**Checks** (`pnpm dev`, headless Chrome 1280x800):
+
+- `npx tsc --noEmit` and `pnpm test` pass: 257 tests, 13 of them new in `actorScene.test.ts`.
+  `mapScene.test.ts` now checks every vertex of every wall: each polygon point appears at
+  (x, *, y) and not mirrored, and every geometry X/Z is a polygon point.
+- `/?auto&seed=42` (2D) and `/?3d=1&auto&seed=42` (3D, `three.js r187`) give the same score card:
+  Lost / pro won, 500 points, 3.7 s / 6.0 s, 2 / 3 kills, 0 HP, 100%. Neither run logs a warning
+  or error. `?fps` (shown with `auto`) reads 56–60 fps in 3D and 58–60 fps in 2D.
+- Mid-round screenshots at the same times in 2D and 3D:
+  - the aim cone and nose point at the same enemy;
+  - the enemy cones and ticks face the same way (left, and up);
+  - the player tracer and its hit flash appear, then an enemy tracer in orange;
+  - the down X and the spike zone with its pulse ring are drawn.
+- On `/?3d=1&auto&seed=42&level=1`, the green defuse arc starts at 12 o'clock and grows clockwise
+  (16% at the screenshot).
+- Walls depth-occlude actors: an enemy at the A-site wall has the glow on its far side cut by the
+  wall top, where 2D draws it over the wall.
+
+**Still missing:** the side-by-side replay viewports (phase 6; the replay shows panels[0] only),
+shadows and quality tiers (phase 7), the CHANGELOG entry (phase 8).

@@ -4,14 +4,15 @@ import type { MapDef } from "../../maps/types";
 import type { Vec2 } from "../../sim/geom";
 import { THEME_NUM } from "../../ui/theme";
 import type { FrameView, GameRenderer, PanelSpec } from "../renderer";
+import { ActorLayer } from "./actorScene";
 import { type CameraFit, fitCamera, groundPoint, ndcFromClient } from "./camMath";
 import { makeCanvasLabel } from "./labels";
 import { buildMapScene, disposeMapScene } from "./mapScene";
 
 /**
- * Optional three.js renderer (phase 4: static map only). Loaded lazily via `import()` when
- * `pickRenderer` returns "3d". Renders panels[0] into the whole canvas; actors come in phase 5,
- * multi-panel replay in phase 6.
+ * Optional three.js renderer (phase 4 map, phase 5 actors). Loaded lazily via `import()` when
+ * `pickRenderer` returns "3d". Renders panels[0] into the whole canvas with frames[0] drawn by one
+ * pooled `ActorLayer` that survives `loadMap`; multi-panel replay comes in phase 6.
  */
 export class Three3dRenderer implements GameRenderer {
   readonly kind = "3d" as const;
@@ -19,6 +20,7 @@ export class Three3dRenderer implements GameRenderer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera();
+  private readonly actors = new ActorLayer();
   private map: MapDef | null = null;
   private group: THREE.Group | null = null;
   private fit: CameraFit | null = null;
@@ -35,6 +37,7 @@ export class Three3dRenderer implements GameRenderer {
     this.cssW = opts.width;
     this.cssH = opts.height;
     this.renderer.setSize(opts.width, opts.height);
+    this.scene.add(this.actors.group);
   }
 
   /** Panels last passed to `setPanels` (only panels[0] is drawn this phase). */
@@ -61,7 +64,8 @@ export class Three3dRenderer implements GameRenderer {
     this.panels = panels;
   }
 
-  draw(_frames: readonly FrameView[]): void {
+  draw(frames: readonly FrameView[]): void {
+    this.actors.update(frames[0] ?? null, performance.now());
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -76,6 +80,8 @@ export class Three3dRenderer implements GameRenderer {
 
   destroy(): void {
     this.dropMap();
+    this.scene.remove(this.actors.group);
+    this.actors.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     this.canvas.remove();
