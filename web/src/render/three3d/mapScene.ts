@@ -129,7 +129,7 @@ function zoneFill(name: string, poly: Polygon, color: number, opacity: number): 
   return mesh;
 }
 
-/** Static map: floor, grid, spawns, sites, extruded walls, lights and (optional) labels. */
+/** Static map: floor, grid, spawns, sites, extruded walls and (optional) labels. */
 export function buildMapScene(map: MapDef, opts: MapSceneOptions = {}): THREE.Group {
   const root = new THREE.Group();
   root.name = "map";
@@ -186,16 +186,6 @@ export function buildMapScene(map: MapDef, opts: MapSceneOptions = {}): THREE.Gr
     walls.add(edges);
   }
   root.add(walls);
-
-  // Lights only affect the Lambert walls; floor, fills and lines are unlit palette colours.
-  const hemi = new THREE.HemisphereLight(0xffffff, THEME_NUM.bg, 1.6);
-  hemi.name = "hemi-light";
-  root.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-  sun.name = "sun-light";
-  sun.position.set(w * 0.35, Math.max(w, h), h * 1.4);
-  sun.target.position.set(w / 2, 0, h / 2);
-  root.add(sun, sun.target);
 
   if (opts.makeLabel) {
     const place = (obj: THREE.Object3D | null, poly: Polygon, name: string): void => {

@@ -289,7 +289,7 @@ A three.js `GameRenderer` that draws the static map with the phase 3 camera. It 
   (the cyan edges stand in for it). Walls are lit, so their faces are a little lighter or darker
   than `WALL_FILL`.
 - Still missing after phase 4: actors, tracers and the spike (done in phase 5, below); the
-  side-by-side replay panels (phase 6, the replay shows panels[0] only); shadows (phase 7).
+  side-by-side replay panels (done in phase 6, below); shadows (phase 7).
 - Checks (headless Chrome, 1280x800, `pnpm dev`):
   - `/?auto&seed=42` (2D) and `/?3d=1&auto&seed=42` (3D, canvas `data-engine="three.js r187"`)
     give the same score card: 500 points, 3.7 s / 6.0 s, 2 / 3 kills, tick 111. The 3D run logs no
@@ -408,5 +408,51 @@ The entry grows by +40 B raw / +13 B gzip over phase 4: only the constants moved
 - Walls depth-occlude actors: an enemy at the A-site wall has the glow on its far side cut by the
   wall top, where 2D draws it over the wall.
 
-**Still missing:** the side-by-side replay viewports (phase 6; the replay shows panels[0] only),
-shadows and quality tiers (phase 7), the CHANGELOG entry (phase 8).
+## Phase 6 — replay viewports
+
+The 3D renderer now honours every `PanelSpec`. Replay fields use independent scissor viewports,
+camera fits and actor layers in the shared WebGL canvas. The 2D renderer remains the default and
+its output is unchanged.
+
+- `web/src/render/panelLayout.ts` is the pure shared geometry module. `pixi2d.ts` uses its
+  `HEADER_H` and `fieldRect`, keeping the existing 2D field offsets and hit testing aligned with
+  the 3D renderer.
+- `Three3dRenderer` converts each CSS field rectangle with `glViewport`; the y coordinate is
+  flipped as `cssH - rect.y - rect.h` for WebGL's bottom-left origin. It clears once, then renders
+  the shared map under one scissor per field. Each field uses a cached square camera fit and its
+  own `ActorLayer`; with no panel specs, the whole-canvas aspect fit remains the fallback.
+- `screenToWorld` maps client coordinates through the canvas's CSS scaling, selects a field with
+  `panelAt`, and uses that field's client rectangle and camera fit. Headers, gaps, points outside
+  the canvas and points outside the map return `null`.
+- `web/src/render/three3d/panelHud.ts` owns a separate orthographic scene in CSS pixels. It draws
+  the titled panels' bevelled surface plates, accent bars, field frames, corner ticks, and title
+  and note textures. The HUD is rebuilt only on panel changes or resize and is rendered after the
+  scissored map fields. Its note uses the same overflow rule as Pixi; Canvas `measureText` can
+  differ slightly from Pixi's text metrics at the cutoff.
+- The hemisphere and directional lights now belong to the renderer scene rather than the map
+  group. Their map-relative position and intensity are unchanged. `ActorLayer.update` reuses its
+  bound pool callbacks, and any positive defuse fraction draws at least one progress segment.
+
+**Remaining parity notes:** Lambert-lit 3D bodies differ slightly from flat 2D colours, and 3D
+depth replaces the 2D z-merge for downs and enemies. The 2D renderer's output and default behavior
+are unchanged. Shadows and quality tiers remain Phase 7 work; the CHANGELOG entry remains Phase 8.
+
+**Chunks** after `pnpm -C web build:public` (gzip = `gzip -9`):
+
+| Chunk | Raw bytes | Gzip bytes |
+| --- | ---: | ---: |
+| `index-*.js` (entry) | 402,449 | 123,111 |
+| `three3d-*.js` (renderer, map, actors, HUD, camera math) | 20,661 | 7,642 |
+| `three.module-*.js` | 570,239 | 140,653 |
+
+**Checks:**
+
+- `tsc --noEmit` clean, 268/268 unit tests, `verify-dist: OK (6 level(s) …)`.
+- `/?auto&seed=42` (2D) and `/?3d=1&auto&seed=42` (3D) at 1280x800: same score card, 500 points,
+  3.7 s / 6.0 s, 2/3 kills. The replay shows YOU and PRO side by side, each with its header plate.
+- 3D replay in a portrait viewport: the panels stack vertically, each with its header.
+- 3D replay controls: pause holds the time, the slider scrubs to 3.0 / 6.0 s, speeds 1×/2×/4× advance
+  1.01/2.00/4.00 s per second, and closing returns to the score card. `screenToWorld` field/header/gap
+  cases are covered by `panelLayout` unit tests.
+- `?fps` during the replay: 3D 49–60 fps, 2D 60 fps. No console errors from the app.
+- Known minor difference: the 3D header accent tick and frame are 1 px, while 2D strokes them at 2 px.

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import { KILN } from "../src/maps/kiln";
 import { ATTACK_TINT, DEFENSE_TINT, FLOOR, WALL_FILL } from "../src/render/palette";
+import { createLights, placeLights } from "../src/render/three3d/lights";
 import { buildMapScene, disposeMapScene, type LabelStyle, WALL_HEIGHT } from "../src/render/three3d/mapScene";
 import { polygonCentroid } from "../src/sim/geom";
 import { THEME_NUM } from "../src/ui/theme";
@@ -126,8 +127,24 @@ describe("3D map scene", () => {
       expectMat(`site-${s}-brackets`, THEME_NUM.amber, 0.9);
     }
     expect(mat(byName(scene, "wall"))).toBeInstanceOf(THREE.MeshLambertMaterial);
-    expect(byName(scene, "hemi-light")).toBeInstanceOf(THREE.HemisphereLight);
-    expect(byName(scene, "sun-light")).toBeInstanceOf(THREE.DirectionalLight);
+  });
+
+  it("does not own renderer lights", () => {
+    expect(all(scene, "hemi-light")).toHaveLength(0);
+    expect(all(scene, "sun-light")).toHaveLength(0);
+  });
+
+  it("creates renderer lights at the map-relative positions", () => {
+    const lights = createLights();
+    placeLights(lights, map.width, map.height);
+    expect(lights.hemi).toBeInstanceOf(THREE.HemisphereLight);
+    expect(lights.hemi.name).toBe("hemi-light");
+    expect(lights.hemi.intensity).toBe(1.6);
+    expect(lights.sun).toBeInstanceOf(THREE.DirectionalLight);
+    expect(lights.sun.name).toBe("sun-light");
+    expect(lights.sun.intensity).toBe(1.2);
+    expect(lights.sun.position.toArray()).toEqual([map.width * 0.35, Math.max(map.width, map.height), map.height * 1.4]);
+    expect(lights.sun.target.position.toArray()).toEqual([map.width / 2, 0, map.height / 2]);
   });
 
   it("adds no labels without a factory", () => {

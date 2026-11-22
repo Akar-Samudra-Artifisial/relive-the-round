@@ -6,10 +6,8 @@ import { DISPLAY_FONT, MONO_FONT } from "../ui/fonts";
 import { THEME_NUM } from "../ui/theme";
 import { drawFrame } from "./actors";
 import { drawMap } from "./mapView";
+import { fieldRect, HEADER_H } from "./panelLayout";
 import type { FrameView, GameRenderer, PanelSpec } from "./renderer";
-
-/** Height of the per-panel header strip (px) on titled (replay) panels. */
-const HEADER_H = 32;
 
 /** HUD header strip: dark plate with a bevelled right end, accent bar on the left edge. */
 function hudHeader(w: number, accent: number): Graphics {
@@ -21,11 +19,6 @@ function hudHeader(w: number, accent: number): Graphics {
     .stroke({ width: 1, color: THEME_NUM.line, alignment: 1 })
     .rect(0, 0, 4, h)
     .fill({ color: accent });
-}
-
-/** Top-left of a panel's map field (logical px): below the header strip when the panel has a title. */
-function fieldOrigin(p: PanelSpec): Vec2 {
-  return { x: p.x, y: p.y + (p.title !== undefined ? HEADER_H : 0) };
 }
 
 /**
@@ -78,10 +71,10 @@ export class Pixi2dRenderer implements GameRenderer {
     const px = clientToCanvas(clientX, clientY, this.app.canvas.getBoundingClientRect(), this.app.screen.width);
     const unit = Math.max(this.map.width, this.map.height);
     for (const p of this.specs) {
-      const o = fieldOrigin(p);
-      if (px.x < o.x || px.y < o.y || px.x > o.x + p.size || px.y > o.y + p.size) continue;
-      const scale = p.size / unit;
-      return { x: (px.x - o.x) / scale, y: (px.y - o.y) / scale };
+      const field = fieldRect(p);
+      if (px.x < field.x || px.y < field.y || px.x >= field.x + field.w || px.y >= field.y + field.h) continue;
+      const scale = field.w / unit;
+      return { x: (px.x - field.x) / scale, y: (px.y - field.y) / scale };
     }
     return null;
   }
@@ -99,11 +92,12 @@ export class Pixi2dRenderer implements GameRenderer {
     if (!map) return;
     for (const spec of this.specs) {
       const scale = spec.size / Math.max(map.width, map.height);
+      const fieldArea = fieldRect(spec);
       const view = new Container();
       view.position.set(spec.x, spec.y);
       const dyn = new Graphics();
       const field = new Container();
-      field.position.set(0, fieldOrigin(spec).y - spec.y);
+      field.position.set(0, fieldArea.y - spec.y);
       field.scale.set(scale);
       // Without an explicit value logical px == CSS px (the replay canvas is sized to the viewport).
       field.addChild(drawMap(map, { cssPxPerUnit: this.mapOpts.cssPxPerUnit ?? scale }), dyn);

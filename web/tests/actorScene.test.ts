@@ -64,6 +64,28 @@ const base: FrameView = {
 };
 
 describe("ActorLayer", () => {
+  it("keeps actor positions independent across layers", () => {
+    const left = new ActorLayer();
+    const right = new ActorLayer();
+    left.update({
+      ...base,
+      player: { x: 1000, y: 2000, aim: null },
+      enemies: [{ x: 3000, y: 1000, fx: 0, fy: 1 }],
+    }, 0);
+    right.update({
+      ...base,
+      player: { x: 8000, y: 7000, aim: null },
+      enemies: [{ x: 6000, y: 5000, fx: 1, fy: 0 }],
+    }, 0);
+
+    expect(worldPos(one(left, "player-body")).toArray()).toEqual([1000, 0, 2000]);
+    expect(worldPos(one(right, "player-body")).toArray()).toEqual([8000, 0, 7000]);
+    expect(worldPos(one(left, "enemy-body")).toArray()).toEqual([3000, 0, 1000]);
+    expect(worldPos(one(right, "enemy-body")).toArray()).toEqual([6000, 0, 5000]);
+    left.dispose();
+    right.dispose();
+  });
+
   it("is a group named actors and shows one mesh set per frame item", () => {
     const layer = new ActorLayer();
     expect(layer.group.name).toBe("actors");
@@ -200,6 +222,13 @@ describe("ActorLayer", () => {
 
     layer.update({ ...base, spike: { x: 5000, y: 5000, defuse: 0, pulseT: null } }, 0);
     for (const n of ["spike-track", "spike-progress-own", "spike-progress-enemy"]) expect(named(layer, n), n).toHaveLength(0);
+  });
+
+  it("shows one progress segment for a tiny positive defuse fraction", () => {
+    const layer = new ActorLayer();
+    layer.update({ ...base, spike: { ...base.spike!, defuse: 0.001 } }, 0);
+    expect(one(layer, "spike-progress-own").geometry.drawRange.count).toBeGreaterThanOrEqual(6);
+    layer.dispose();
   });
 
   it("pulses the spike ring from pulseT and keeps it still without it", () => {

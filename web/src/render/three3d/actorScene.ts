@@ -71,6 +71,12 @@ export class ActorLayer {
   private readonly enemies: EnemySlot[] = [];
   private readonly downs: DownSlot[] = [];
   private readonly tracers: TracerSlot[] = [];
+  private readonly makeEnemyFn = (): EnemySlot => this.makeEnemy();
+  private readonly setEnemyFn = (slot: EnemySlot, view: ActorView): void => this.setEnemy(slot, view);
+  private readonly makeDownFn = (): DownSlot => this.makeDown();
+  private readonly setDownFn = (slot: DownSlot, view: DownView): void => this.setDown(slot, view);
+  private readonly makeTracerFn = (): TracerSlot => this.makeTracer();
+  private readonly setTracerFn = (slot: TracerSlot, view: TracerView): void => this.setTracer(slot, view);
   private readonly ringCos = new Float32Array(RING_SEGMENTS + 1);
   private readonly ringSin = new Float32Array(RING_SEGMENTS + 1);
 
@@ -170,9 +176,9 @@ export class ActorLayer {
   update(frame: FrameView | null, _nowMs: number): void {
     this.updatePlayer(frame?.player ?? null);
     this.updateSpike(frame?.spike ?? null);
-    fill(this.enemies, frame?.enemies ?? NO_ENEMIES, () => this.makeEnemy(), (s, e) => this.setEnemy(s, e));
-    fill(this.downs, frame?.downs ?? NO_DOWNS, () => this.makeDown(), (s, v) => this.setDown(s, v));
-    fill(this.tracers, frame?.tracers ?? NO_TRACERS, () => this.makeTracer(), (s, t) => this.setTracer(s, t));
+    fill(this.enemies, frame?.enemies ?? NO_ENEMIES, this.makeEnemyFn, this.setEnemyFn);
+    fill(this.downs, frame?.downs ?? NO_DOWNS, this.makeDownFn, this.setDownFn);
+    fill(this.tracers, frame?.tracers ?? NO_TRACERS, this.makeTracerFn, this.setTracerFn);
   }
 
   /** Disposes every geometry and material this layer created. */
@@ -326,7 +332,8 @@ export class ActorLayer {
     s.own.visible = own;
     s.enemy.visible = !own && enemy > 0;
     const frac = clamp01(own ? sp.defuse : enemy);
-    this.geo.progress.setDrawRange(0, 6 * Math.round(frac * RING_SEGMENTS));
+    const segments = frac > 0 ? Math.max(1, Math.round(frac * RING_SEGMENTS)) : 0;
+    this.geo.progress.setDrawRange(0, 6 * segments);
   }
 
   /** Rewrites the pulse ring rows in place (constant stroke width, no allocation). */
