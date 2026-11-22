@@ -243,7 +243,7 @@ describe("frame view purity", () => {
 describe("renderer seam", () => {
   const sources = import.meta.glob("../src/**/*.ts", { query: "?raw", import: "default", eager: true });
   const pixiAllowed = (file: string): boolean =>
-    ["../src/render/pixi2d.ts", "../src/render/mapView.ts", "../src/render/actors.ts", "../src/main.ts"].includes(file) || file.startsWith("../src/debug/");
+    ["../src/render/pixi2d.ts", "../src/render/mapView.ts", "../src/render/actors.ts", "../src/render/actorSprites.ts", "../src/main.ts"].includes(file) || file.startsWith("../src/debug/");
 
   it("only the Pixi renderer files (and main.ts for unsafe-eval, plus the dev debug page) import pixi.js", () => {
     const users = Object.entries(sources)

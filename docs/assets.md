@@ -52,6 +52,9 @@ Each file is one mesh, one material, one texture.
 | `crate.glb` | 4103 | 1,940 | 98.2 KB | 81.6 × 80 × 81.6 | Olive supply crate with steel corners; symmetric. |
 | `barrel.glb` | 4104 | 1,938 | 91.8 KB | 59.8 × 90 × 60 | Rust-orange steel drum; symmetric. |
 
+| `operator-rifle.glb` | 4201 | 3,830 | 159.9 KB | 49 × 180 × 102.6 | Operator holding a rifle; rifle muzzle points +Z (the raw TRELLIS model had it on +X, baked with a −90° Y rotation). Light grey albedo, dark visor. |
+| `enemy.glb` | 4203 | 3,830 | 213.0 KB | 97.9 × 180 × 140.8 | Heavy armoured trooper with backpack (bulky, hooded helmet, wide pauldrons); SMG points +Z, backpack on −Z (no rotation needed). Dark grey gun in albedo. Top-down texture has dark blotches on the pauldrons (not visible in the concept). |
+
 Sizes are `ls -l` of the final files; triangle counts are from `gltf-transform inspect`.
 
 Concept prompts (`runware:z-image@0`, 1024×1024, no negative prompt):
@@ -75,6 +78,39 @@ Concept prompts (`runware:z-image@0`, 1024×1024, no negative prompt):
   with two horizontal ribs, closed lid, slightly scuffed, three-quarter view, no text, no labels, no
   logos, clean silhouette, soft even studio lighting, plain pure white background, centered, single
   object
+
+Character pass (branch `feat/character-art`, same pipeline and TRELLIS settings, `seed: 7`; triangle
+budget 3,950 → 3,830 after simplify; the concept prompts were written for this pass):
+
+- Operator with rifle (concept seed 4201): same prompt as the Operator above but "holding a rifle in
+  both hands pointing straight forward at chest height, rifle clearly visible with a long barrel and
+  stock" instead of "no weapon".
+- Enemy (concept seed 4203, final): 3D game asset render of a generic heavy armored trooper character
+  standing upright, strict side profile view facing right, whole body turned to the right, full body
+  from helmet to boots, bulky silhouette with oversized rounded shoulder pauldrons, tall angular
+  hooded helmet with a narrow dark visor slit, large backpack on the back, thick armored arms and legs,
+  holding a short compact submachine gun with a long curved magazine in both hands pointing straight
+  to the right, matte light grey and off-white armor, no logos, no text, no insignia, clean readable
+  silhouette, simple stylized shapes, soft even studio lighting, plain pure white background,
+  centered, single character. Attempt 1 (seed 4202, three-quarter view, same prompt otherwise) was
+  discarded: the gun pointed diagonally and the torso faced sideways to it.
+
+Top-down sprites (`web/public/sprites/operator.webp`, `enemy.webp`, 256×256, transparent): each final
+GLB rendered offline from straight above with a three.js orthographic camera in headless Chrome
+(ambient 1.6 + top directional 1.6, material colour forced white, so `sprite.tint` works). Model +Z
+points to image +X (rifle to the right). Scale 0.8 cm/px for both (256 px = 204.8 cm), centred on the
+footprint bounding box. Operator footprint 128×62 px, enemy 176×124 px. Sprite WebP quality 90.
+The files are stored as rendered; at load time the 2D renderer lifts their grey levels to 0.62..1
+(`liftLevels` in `web/src/render/spritePose.ts`) so the role tint stays bright and dark patches vanish.
+
+Attempts and cost, character pass (actual `cost`, USD):
+
+| Asset | Concept | 3D | Total |
+| --- | --- | --- | --- |
+| operator-rifle | 0.0104 | 0.0149 | 0.0253 |
+| enemy attempt 1 (discarded) | 0.0104 | 0.0268 | 0.0372 |
+| enemy attempt 2 (final) | 0.0119 | 0.0208 | 0.0327 |
+| **Total** | 0.0327 | 0.0625 | **0.0952** |
 
 Attempts and cost (actual `cost` returned by the API, USD): one attempt per asset, no retries.
 

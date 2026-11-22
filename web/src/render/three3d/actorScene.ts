@@ -14,7 +14,9 @@ import {
   VIEW_HALF,
   VIEW_LEN,
 } from "../actorStyle";
+import { MotionTracker, type MotionSample } from "../actorMotion";
 import type { ActorView, DownView, FrameView, SpikeView, TracerView } from "../renderer";
+import type { ActorModel, ActorModels } from "./actorModels";
 
 /**
  * Dynamic three.js layer (phase 5): draws one `FrameView` with pooled meshes. World (x, y) maps to
@@ -22,6 +24,11 @@ import type { ActorView, DownView, FrameView, SpikeView, TracerView } from "../r
  * rotating about Y by θ sends local +X to (cos θ, 0, -sin θ), so θ = -a gives (cos a, 0, sin a).
  * All geometries and materials are created in the constructor (or when a pool grows past its
  * largest size); `update` only toggles visibility and sets transforms, opacity and colour.
+ *
+ * Bodies sit under a per-actor pivot: slot group (position) → pivot (yaw) → body. Until
+ * `setModels` is called the body is the primitive cylinder; afterwards the same mesh swaps to the
+ * shared character geometry with a per-layer tinted material, and procedural motion (yaw from the
+ * heading, footstep bob, forward lean, fall when downed) comes from `MotionTracker`.
  */
 
 /** Base heights (cm) of the flat ground decals, above the map layers (Y 0-3). */
@@ -39,14 +46,31 @@ const PULSE_W = 16;
 const PULSE_GROW = 420;
 const PULSE_PERIOD = 1.2;
 const POOL = { enemies: 5, downs: 6, tracers: 24 } as const;
+/** Uniform scale of the character models (authored ~180 cm tall). Tuned in the browser against the rings/glow. */
+export const MODEL_SCALE = 2.6;
+/** Extra size for the clutcher (YOU/PRO) model: the operator mesh reads smaller than the enemy's. */
+export const PLAYER_MODEL_SIZE = 1.3;
+/** Footstep bob amplitude (cm, in pivot space). */
+const MODEL_BOB = 6;
+/** Downed bodies: tint multiplier. */
+const DOWN_DARK = 0.38;
+/** Emissive share of the tint so the textured models stay readable in the dim scene. */
+const MODEL_EMISSIVE = 0.22;
 /** renderOrder per layer; the map uses up to 5. */
 const ORDER = { spike: 6, actor: 7, player: 8, tracer: 9 } as const;
 
 type Owned = THREE.BufferGeometry | THREE.Material;
 type BasicMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
 
-type EnemySlot = { group: THREE.Group; cone: THREE.Mesh; tick: THREE.Mesh };
-type DownSlot = { group: THREE.Group; ring: THREE.Mesh; x: THREE.Mesh };
+type BodyMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>;
+type EnemySlot = { group: THREE.Group; pivot: THREE.Group; body: BodyMesh; cone: THREE.Mesh; tick: THREE.Mesh };
+type DownSlot = { group: THREE.Group; pivot: THREE.Group; body: BodyMesh; ring: THREE.Mesh; x: THREE.Mesh };
+type ModelMats = {
+  player: THREE.MeshLambertMaterial;
+  enemy: THREE.MeshLambertMaterial;
+  playerDown: THREE.MeshLambertMaterial;
+  enemyDown: THREE.MeshLambertMaterial;
+};
 type TracerSlot = { group: THREE.Group; halo: BasicMesh; core: BasicMesh; hitOuter: BasicMesh; hitInner: BasicMesh };
 
 const NO_ENEMIES: readonly ActorView[] = [];
@@ -60,6 +84,8 @@ function toGround<T extends THREE.BufferGeometry>(g: T): T {
 }
 
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+/** MotionTracker key of the clutcher (enemies use their `z`, which is ≥ 0). */
+const PLAYER_KEY = -1;
 
 export class ActorLayer {
   readonly group = new THREE.Group();
@@ -71,8 +97,14 @@ export class ActorLayer {
   private readonly enemies: EnemySlot[] = [];
   private readonly downs: DownSlot[] = [];
   private readonly tracers: TracerSlot[] = [];
+  private readonly motion = new MotionTracker();
+  private models: ActorModels | null = null;
+  private modelMat: ModelMats | null = null;
+  private playerColor: number = PLAYER_COLOR;
+  /** Set by the renderer; snaps the motion (no bob, lean or fall animation). */
+  reducedMotion = false;
   private readonly makeEnemyFn = (): EnemySlot => this.makeEnemy();
-  private readonly setEnemyFn = (slot: EnemySlot, view: ActorView): void => this.setEnemy(slot, view);
+  private readonly setEnemyFn = (slot: EnemySlot, view: ActorView, i: number): void => this.setEnemy(slot, view, i);
   private readonly makeDownFn = (): DownSlot => this.makeDown();
   private readonly setDownFn = (slot: DownSlot, view: DownView): void => this.setDown(slot, view);
   private readonly makeTracerFn = (): TracerSlot => this.makeTracer();
@@ -133,17 +165,20 @@ export class ActorLayer {
     const pg = new THREE.Group();
     pg.name = "player";
     const py = DECAL_Y.player;
+    const pivot = new THREE.Group();
+    pivot.name = "player-pivot";
     const body = this.mesh("player-body", this.geo.cylinder, this.mat.playerBody, 0, 0);
     body.scale.set(PLAYER_R, PLAYER_HEIGHT, PLAYER_R);
     body.castShadow = true;
+    pivot.add(body);
     const glow = this.mesh("player-glow", this.geo.disc, this.mat.playerGlow, py, ORDER.player);
     glow.scale.set(PLAYER_R * 1.9, 1, PLAYER_R * 1.9);
     const aimCone = this.mesh("player-aim-cone", this.geo.aimCone, this.mat.aimCone, py + 0.1, ORDER.player);
     const aimLine = this.mesh("player-aim-line", this.geo.strip, this.mat.aimLine, py + 0.2, ORDER.player);
     aimLine.scale.set(AIM_LEN, 1, 10);
     const nose = this.mesh("player-nose", this.geo.nose, this.mat.nose, py + 0.4, ORDER.player);
-    pg.add(body, glow, aimCone, aimLine, nose);
-    this.player = { group: pg, aimCone, aimLine, nose };
+    pg.add(pivot, glow, aimCone, aimLine, nose);
+    this.player = { group: pg, pivot, body, aimCone, aimLine, nose };
 
     // Spike (drawn first in 2D: lowest decals).
     const sg = new THREE.Group();
@@ -173,16 +208,57 @@ export class ActorLayer {
     this.update(null, 0);
   }
 
-  /** Shows `frame` (or nothing for null). `_nowMs` is reserved: pulse and fade come from the frame. */
-  update(frame: FrameView | null, _nowMs: number): void {
+  /**
+   * Shows `frame` (or nothing for null). Pulse and fade come from the frame; `nowMs` (wall clock)
+   * only drives the procedural body motion.
+   */
+  update(frame: FrameView | null, nowMs: number): void {
+    // A null frame shows nothing and must not count as the panel's first real frame.
+    this.motion.begin(nowMs, this.reducedMotion, frame !== null);
     this.updatePlayer(frame?.player ?? null);
     this.updateSpike(frame?.spike ?? null);
     fill(this.enemies, frame?.enemies ?? NO_ENEMIES, this.makeEnemyFn, this.setEnemyFn);
     fill(this.downs, frame?.downs ?? NO_DOWNS, this.makeDownFn, this.setDownFn);
     fill(this.tracers, frame?.tracers ?? NO_TRACERS, this.makeTracerFn, this.setTracerFn);
+    this.motion.end();
   }
 
-  /** Disposes every geometry and material this layer created. */
+  /** True once `setModels` swapped the bodies to the character models. */
+  get hasModels(): boolean {
+    return this.models !== null;
+  }
+
+  /**
+   * Swaps every body to the character models. The geometry and texture stay owned by the caller
+   * (shared across layers); the tinted materials are created here once and owned by this layer.
+   */
+  setModels(models: ActorModels): void {
+    if (this.models) return;
+    this.models = models;
+    const lambert = (model: ActorModel): THREE.MeshLambertMaterial => this.own(new THREE.MeshLambertMaterial({ map: model.map }));
+    this.modelMat = {
+      player: lambert(models.operator),
+      enemy: lambert(models.enemy),
+      playerDown: lambert(models.operator),
+      enemyDown: lambert(models.enemy),
+    };
+    this.applyColors();
+    const { body } = this.player;
+    body.geometry = models.operator.geometry;
+    body.material = this.modelMat.player;
+    body.scale.setScalar(MODEL_SCALE * PLAYER_MODEL_SIZE);
+    for (const s of this.enemies) this.modelEnemy(s);
+    for (const s of this.downs) s.body.scale.setScalar(MODEL_SCALE);
+  }
+
+  /** Clutcher colour (body, glow, aim and player-side downs): cyan for YOU, amber for PRO. */
+  setPlayerColor(color: number): void {
+    if (color === this.playerColor) return;
+    this.playerColor = color;
+    this.applyColors();
+  }
+
+  /** Disposes every geometry and material this layer created (not the shared model geometry). */
   dispose(): void {
     for (const x of this.owned) x.dispose();
     this.owned.clear();
@@ -205,21 +281,55 @@ export class ActorLayer {
     return m;
   }
 
+  private applyColors(): void {
+    const c = this.playerColor;
+    this.mat.playerBody.color.setHex(c);
+    for (const m of [this.mat.playerGlow, this.mat.aimCone, this.mat.aimLine, this.mat.downRing.player, this.mat.downX.player]) m.color.setHex(c);
+    const mm = this.modelMat;
+    if (!mm) return;
+    tint(mm.player, c, false);
+    tint(mm.playerDown, c, true);
+    tint(mm.enemy, ENEMY_COLOR, false);
+    tint(mm.enemyDown, ENEMY_COLOR, true);
+  }
+
+  private modelEnemy(s: EnemySlot): void {
+    if (!this.models || !this.modelMat) return;
+    s.body.geometry = this.models.enemy.geometry;
+    s.body.material = this.modelMat.enemy;
+    s.body.scale.setScalar(MODEL_SCALE);
+  }
+
+  /** Yaw, bob and lean of a standing model; a no-op for the primitive cylinders. */
+  private pose(pivot: THREE.Group, body: BodyMesh, m: MotionSample): void {
+    if (!this.models) return;
+    // Models face +Z; rotation.y = θ sends +Z to (sin θ, 0, cos θ) = (cos a, 0, sin a) for θ = π/2 - a.
+    pivot.rotation.y = Math.PI / 2 - m.heading;
+    body.position.y = m.bob * MODEL_BOB;
+    // +rotation.x tips the top towards +Z (forward).
+    body.rotation.x = m.lean;
+  }
+
   private makeEnemy(): EnemySlot {
     const group = new THREE.Group();
     group.name = "enemy";
     const ey = DECAL_Y.enemy;
+    const pivot = new THREE.Group();
+    pivot.name = "enemy-pivot";
     const body = this.mesh("enemy-body", this.geo.cylinder, this.mat.enemyBody, 0, 0);
     body.scale.set(ENEMY_R, ENEMY_HEIGHT, ENEMY_R);
     body.castShadow = true;
+    pivot.add(body);
     const glow = this.mesh("enemy-glow", this.geo.disc, this.mat.enemyGlow, ey, ORDER.actor);
     glow.scale.set(ENEMY_R * 1.8, 1, ENEMY_R * 1.8);
     const cone = this.mesh("enemy-cone", this.geo.viewCone, this.mat.viewCone, ey + 0.2, ORDER.actor);
     const tick = this.mesh("enemy-tick", this.geo.strip, this.mat.tick, ey + 0.4, ORDER.actor);
     tick.scale.set(ENEMY_R + 110, 1, 22);
-    group.add(body, glow, cone, tick);
+    group.add(pivot, glow, cone, tick);
     this.group.add(group);
-    return { group, cone, tick };
+    const slot = { group, pivot, body, cone, tick };
+    this.modelEnemy(slot);
+    return slot;
   }
 
   private makeDown(): DownSlot {
@@ -227,9 +337,17 @@ export class ActorLayer {
     group.name = "down";
     const ring = this.mesh("down-ring", this.geo.downRing, this.mat.downRing.enemy, DECAL_Y.down, ORDER.actor);
     const x = this.mesh("down-x", this.geo.cross, this.mat.downX.enemy, DECAL_Y.down + 0.05, ORDER.actor);
-    group.add(ring, x);
+    // Lying body: only with the character models (the cylinders never had a downed body).
+    const pivot = new THREE.Group();
+    pivot.name = "down-pivot";
+    const body = this.mesh("down-body", this.geo.cylinder, this.mat.enemyBody, 0, 0);
+    body.castShadow = true;
+    body.visible = false;
+    if (this.models) body.scale.setScalar(MODEL_SCALE);
+    pivot.add(body);
+    group.add(pivot, ring, x);
     this.group.add(group);
-    return { group, ring, x };
+    return { group, pivot, body, ring, x };
   }
 
   private makeTracer(): TracerSlot {
@@ -250,14 +368,17 @@ export class ActorLayer {
   }
 
   private updatePlayer(p: FrameView["player"]): void {
-    const { group, aimCone, aimLine, nose } = this.player;
+    const { group, pivot, body, aimCone, aimLine, nose } = this.player;
     group.visible = p !== null;
     if (!p) return;
     group.position.set(p.x, 0, p.y);
     const dx = p.aim ? p.aim.x - p.x : 0;
     const dy = p.aim ? p.aim.y - p.y : 0;
     const hasDir = p.aim !== null && dx * dx + dy * dy > PLAYER_R * PLAYER_R;
-    aimCone.visible = aimLine.visible = nose.visible = hasDir;
+    this.pose(pivot, body, this.motion.actor(PLAYER_KEY, p.x, p.y, hasDir ? dx : undefined, hasDir ? dy : undefined));
+    aimCone.visible = aimLine.visible = hasDir;
+    // The model shows its own facing: the nose is only needed on the cylinder.
+    nose.visible = hasDir && !this.models;
     if (!hasDir) return;
     const r = -Math.atan2(dy, dx);
     aimCone.rotation.y = r;
@@ -265,10 +386,13 @@ export class ActorLayer {
     nose.rotation.y = r;
   }
 
-  private setEnemy(s: EnemySlot, e: ActorView): void {
+  private setEnemy(s: EnemySlot, e: ActorView, i: number): void {
     s.group.position.set(e.x, 0, e.y);
     const hasFacing = e.fx !== undefined && e.fy !== undefined && (e.fx !== 0 || e.fy !== 0);
-    s.cone.visible = s.tick.visible = hasFacing;
+    this.pose(s.pivot, s.body, this.motion.actor(e.z ?? i, e.x, e.y, e.fx, e.fy));
+    s.cone.visible = hasFacing;
+    // The model shows its own facing: the tick is only needed on the cylinder.
+    s.tick.visible = hasFacing && !this.models;
     if (!hasFacing) return;
     const r = -Math.atan2(e.fy!, e.fx!);
     s.cone.rotation.y = r;
@@ -280,6 +404,21 @@ export class ActorLayer {
     s.group.position.set(v.x, 0, v.y);
     s.ring.material = this.mat.downRing[v.side];
     s.x.material = this.mat.downX[v.side];
+    const { models, modelMat } = this;
+    s.body.visible = models !== null;
+    if (!models || !modelMat) return;
+    const player = v.side === "player";
+    const model = player ? models.operator : models.enemy;
+    s.body.geometry = model.geometry;
+    s.body.material = player ? modelMat.playerDown : modelMat.enemyDown;
+    const scale = player ? MODEL_SCALE * PLAYER_MODEL_SIZE : MODEL_SCALE;
+    s.body.scale.setScalar(scale);
+    const { fallT, yaw } = this.motion.fall(v.x, v.y, v.side);
+    // Tips over backwards about local X (top towards -Z), sliding +Z so the lying body centres on
+    // the down spot, and lifting so its back rests on the floor.
+    s.pivot.rotation.y = yaw;
+    s.body.rotation.x = (-Math.PI / 2) * fallT;
+    s.body.position.set(0, model.back * scale * fallT, (model.height * scale * fallT) / 2);
   }
 
   private setTracer(s: TracerSlot, t: TracerView): void {
@@ -355,13 +494,20 @@ export class ActorLayer {
 }
 
 /** Shows the first `items.length` slots (growing the pool if needed) and hides the rest. */
-function fill<S extends { group: THREE.Group }, V>(pool: S[], items: readonly V[], make: () => S, set: (s: S, v: V) => void): void {
+function fill<S extends { group: THREE.Group }, V>(pool: S[], items: readonly V[], make: () => S, set: (s: S, v: V, i: number) => void): void {
   while (pool.length < items.length) pool.push(make());
   for (let i = 0; i < pool.length; i++) {
     const s = pool[i]!;
     s.group.visible = i < items.length;
-    if (i < items.length) set(s, items[i]!);
+    if (i < items.length) set(s, items[i]!, i);
   }
+}
+
+/** Model material tint: light-grey albedo × colour, plus a little emissive (none when downed). */
+function tint(m: THREE.MeshLambertMaterial, color: number, downed: boolean): void {
+  m.color.setHex(color);
+  if (downed) m.color.multiplyScalar(DOWN_DARK);
+  m.emissive.setHex(color).multiplyScalar(downed ? 0 : MODEL_EMISSIVE);
 }
 
 /** Ground ring of radius `r` and stroke `w`; theta grows with the world angle from `start`. */
