@@ -18,6 +18,9 @@ Relive the Round was partly built with **Junie** (JetBrains' coding agent) in We
 | [13-3d-phase-6](13-3d-phase-6/session.md) ([prompt](13-3d-phase-6/prompt.md)) | 3D phase 6: replay viewports. Partial: the Junie session failed when credits ran out, the rest was finished outside Junie | 2026-11-22 | `74721b5` |
 | [14-3d-phase-7](14-3d-phase-7/session.md) ([prompt](14-3d-phase-7/prompt.md)) | 3D phase 7: quality tiers, FPS watchdog, 2D fallback. **Not a Junie session** (credits exhausted): implemented by another AI coding tool, then reviewed by a separate review agent | 2026-11-22 | `fb4c1d9` |
 | [15-3d-phase-8](15-3d-phase-8/session.md) ([prompt](15-3d-phase-8/prompt.md)) | 3D phase 8: 3D becomes the default. **Not a Junie session**: implemented by another AI coding tool, reviewed by a separate review agent, committed by the orchestrator | 2026-11-22 | `fffb9e9` |
+| [16-character-art](16-character-art/prompt.md) | Character art: 3D models and 2D sprites replace actor primitives. Prompt only, no Junie session log | 2026-11-22 | `4c7e056` |
+| [17-sound](17-sound/prompt.md) | Synthesized Web Audio sound effects, generative music and mute. Prompt only, no Junie session log | 2026-11-22 | `1d0655a` |
+| [18-walk-anim](18-walk-anim/prompt.md) | CC0 rigged characters with distance-driven walk animation, muzzle tracers, faster player. Prompt only, no Junie session log | 2026-11-23 | `ade1223` |
 
 There is no folder 05. The kiosk plan and its implementation happened in the same Junie session, so both are covered in 02. Phases 7 and 8 of the 3D renderer (folders 14 and 15) were not run in Junie because its credits were exhausted during phase 6. Their `session.md` files are built from git history and `docs/3d-renderer.md`, not from a Junie transcript.
 

@@ -1,7 +1,19 @@
 import { CanvasSource, Container, ImageSource, Rectangle, Sprite, Texture } from "pixi.js";
 import { facing, MotionTracker } from "./actorMotion";
 import { ENEMY_COLOR, PLAYER_COLOR, PLAYER_R } from "./actorStyle";
-import { type MuzzleSet, spriteMuzzles } from "./muzzle";
+import type { Vec2 } from "../sim/geom";
+import type { ShotEvent } from "../sim/sim";
+import {
+  MAX_REACH,
+  type MuzzleOffset,
+  muzzlePoint,
+  muzzleRole,
+  type MuzzleSet,
+  spriteMuzzles,
+  spriteTipPoint,
+  spriteTips,
+  type TracerOrigin,
+} from "./muzzle";
 import type { FrameView } from "./renderer";
 import { downPose, liftLevels, newPose, operatorSize, type SpritePose, standingPose } from "./spritePose";
 
@@ -24,6 +36,8 @@ const OPERATOR_WALK_FILE = "sprites/operator-walk.webp";
 const ENEMY_WALK_FILE = "sprites/enemy-walk.webp";
 export const SHEET_GRID = 3;
 const PLAYER_KEY = -1;
+/** An enemy sprite within this distance (cm) of a shot's origin is taken as its shooter. */
+export const SHOOTER_MATCH_CM = 150;
 
 /**
  * Loads both roles from the app's base URL: the walk sheet when present, else the static sprite
@@ -115,7 +129,7 @@ function liftedCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
   return canvas;
 }
 
-export class SpriteLayer {
+export class SpriteLayer implements TracerOrigin {
   readonly container = new Container();
   private readonly pool: Sprite[] = [];
   private readonly motion = new MotionTracker();
@@ -124,11 +138,61 @@ export class SpriteLayer {
   /** Reduced motion this frame: walk sheets hold their idle cell. */
   private still = false;
 
-  /** Gun tips of the loaded art, where this panel's tracers start. */
+  /** Gun tips of the loaded art in the shot frame: the fallback when no drawn shooter matches. */
   readonly muzzles: MuzzleSet;
+  /** Gun tips per frame (sprite px) of the clutcher's and the enemies' art. */
+  private readonly playerTips: readonly MuzzleOffset[];
+  private readonly enemyTips: readonly MuzzleOffset[];
+  /** Drawn this frame: the clutcher's gun tip (world) and its reach, or reach < 0 when absent. */
+  private readonly playerGun = { x: 0, y: 0, reach: -1 };
+  /** Drawn enemies this frame: body x, y, gun tip x, y and reach, flat (reused, no allocation). */
+  private readonly enemyGuns: number[] = [];
+  private enemyGunCount = 0;
+  private readonly tip = { x: 0, y: 0 };
 
   constructor(private readonly textures: SpriteTextures) {
-    this.muzzles = spriteMuzzles(textures.operator.length, textures.enemy.length, textures.enemy === textures.operator);
+    const enemyIsOperator = textures.enemy === textures.operator;
+    this.muzzles = spriteMuzzles(textures.operator.length, textures.enemy.length, enemyIsOperator);
+    this.playerTips = spriteTips("player", textures.operator.length);
+    this.enemyTips = spriteTips(enemyIsOperator ? "player" : "enemy", textures.enemy.length);
+  }
+
+  /**
+   * TracerOrigin: the gun tip of the shooter's sprite as drawn by the last `update` (the clutcher
+   * for P0, else the enemy nearest to the shot origin), so the tracer leaves the barrel whatever
+   * the sprite's heading or walk cell. Falls back to the shot-frame tip (`muzzlePoint`) without a
+   * match or for a shot too short for the drawn tip.
+   */
+  tracerStart(shot: ShotEvent, out: { x: number; y: number }): Vec2 {
+    const len = Math.hypot(shot.to.x - shot.from.x, shot.to.y - shot.from.y);
+    const role = muzzleRole(shot.by);
+    if (role === "player") {
+      const g = this.playerGun;
+      if (g.reach >= 0 && g.reach <= len * MAX_REACH) {
+        out.x = g.x;
+        out.y = g.y;
+        return out;
+      }
+    } else {
+      const a = this.enemyGuns;
+      let best = -1;
+      let bestD = SHOOTER_MATCH_CM * SHOOTER_MATCH_CM;
+      for (let i = 0; i < this.enemyGunCount; i++) {
+        const dx = a[i * 5]! - shot.from.x;
+        const dy = a[i * 5 + 1]! - shot.from.y;
+        const d = dx * dx + dy * dy;
+        if (d <= bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+      if (best >= 0 && a[best * 5 + 4]! <= len * MAX_REACH) {
+        out.x = a[best * 5 + 2]!;
+        out.y = a[best * 5 + 3]!;
+        return out;
+      }
+    }
+    return muzzlePoint(shot.from, shot.to, this.muzzles[role], out);
   }
 
   /** Draws `f` (downs, then enemies, then the clutcher, matching the Graphics order). */
@@ -145,11 +209,21 @@ export class SpriteLayer {
       const frames = player ? this.textures.operator : this.textures.enemy;
       this.place(frames, downPose(this.pose, d.x, d.y, fall, player ? playerColor : ENEMY_COLOR, player ? operatorSize(frames.length) : 1));
     }
+    this.enemyGunCount = 0;
+    this.playerGun.reach = -1;
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i]!;
       const m = this.motion.actor(e.z ?? i, e.x, e.y, e.fx, e.fy);
       const frames = this.textures.enemy;
-      this.place(frames, standingPose(this.pose, e.x, e.y, m, ENEMY_COLOR, 1, frames.length - 1));
+      const pose = standingPose(this.pose, e.x, e.y, m, ENEMY_COLOR, 1, frames.length - 1);
+      const t = this.gunTip(this.enemyTips, this.place(frames, pose), pose);
+      const a = this.enemyGuns;
+      const k = this.enemyGunCount++ * 5;
+      a[k] = e.x;
+      a[k + 1] = e.y;
+      a[k + 2] = t.x;
+      a[k + 3] = t.y;
+      a[k + 4] = Math.hypot(t.x - e.x, t.y - e.y);
     }
     const p = f.player;
     if (p) {
@@ -160,15 +234,28 @@ export class SpriteLayer {
       const face = facing(p, hasDir, dx, dy);
       const m = this.motion.actor(PLAYER_KEY, p.x, p.y, face?.x, face?.y);
       const frames = this.textures.operator;
-      this.place(frames, standingPose(this.pose, p.x, p.y, m, playerColor, operatorSize(frames.length), frames.length - 1));
+      const pose = standingPose(this.pose, p.x, p.y, m, playerColor, operatorSize(frames.length), frames.length - 1);
+      const t = this.gunTip(this.playerTips, this.place(frames, pose), pose);
+      this.playerGun.x = t.x;
+      this.playerGun.y = t.y;
+      this.playerGun.reach = Math.hypot(t.x - p.x, t.y - p.y);
     }
     this.motion.end();
     for (let i = this.used; i < this.pool.length; i++) this.pool[i]!.visible = false;
   }
 
-  /** `frames[pose.frame]` placed with `pose`; the idle frame 0 with reduced motion or out of range. */
-  private place(frames: readonly Texture[], pose: SpritePose): void {
-    const texture = (this.still ? undefined : frames[pose.frame]) ?? frames[0]!;
+  /** World gun tip of a sprite placed with `pose` showing `frame` (the shared `tip`, reused). */
+  private gunTip(tips: readonly MuzzleOffset[], frame: number, pose: SpritePose): Vec2 {
+    return spriteTipPoint(pose.x, pose.y, pose.rotation, pose.scale, tips[frame] ?? tips[0]!, this.tip);
+  }
+
+  /**
+   * `frames[pose.frame]` placed with `pose`; the idle frame 0 with reduced motion or out of range.
+   * Returns the frame index drawn.
+   */
+  private place(frames: readonly Texture[], pose: SpritePose): number {
+    const index = !this.still && frames[pose.frame] ? pose.frame : 0;
+    const texture = frames[index]!;
     let s = this.pool[this.used];
     if (!s) {
       s = new Sprite(texture);
@@ -184,5 +271,6 @@ export class SpriteLayer {
     s.scale.set(pose.scale);
     s.tint = pose.tint;
     s.alpha = pose.alpha;
+    return index;
   }
 }

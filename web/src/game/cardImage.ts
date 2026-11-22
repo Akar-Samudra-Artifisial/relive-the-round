@@ -57,17 +57,33 @@ function makeCanvas(): { ctx: Ctx2D; toBlob: () => Promise<Blob> } {
   };
 }
 
-/** Quiet zone (modules) drawn inside the QR square; the white plate or padding around it adds more. */
-export const QR_QUIET = 2;
+/** Quiet zone (modules) around the QR symbol, the minimum of ISO/IEC 18004. */
+export const QR_QUIET = 4;
 
 /**
- * Black-on-white QR filling the whole `size` × `size` square at (x, y), with a QR_QUIET-module quiet
- * zone. Module edges are rounded to whole pixels, so modules differ by at most 1 px but stay sharp
- * and seamless (no integer-cell leftover margin). Returns `size`.
+ * Layout of an `n`-module QR in a `size` px white square that already has `outerLight` px of light
+ * margin around it (white CSS padding; 0 on a dark plate): the largest module size whose light
+ * margin (inside plus outside) is at least QR_QUIET modules. `start`/`end` are whole-pixel symbol
+ * edges inside the square; `module` = (end - start) / n.
  */
-export function drawQr(ctx: Pick<Ctx2D, "fillStyle" | "fillRect">, m: QrMatrix, x: number, y: number, size: number): number {
-  const n = m.length + QR_QUIET * 2;
-  const edge = (i: number): number => Math.round(((i + QR_QUIET) * size) / n);
+export function qrLayout(n: number, size: number, outerLight = 0): { start: number; end: number; module: number } {
+  const ideal = Math.min(size / n, (size + 2 * outerLight) / (n + 2 * QR_QUIET));
+  const inner = Math.max(0, (size - n * ideal) / 2);
+  // Rounding the edges inwards only shrinks the modules, so the quiet zone never drops below QR_QUIET.
+  const start = Math.ceil(inner - 1e-9);
+  const end = Math.max(start + n, Math.floor(size - inner + 1e-9));
+  return { start, end, module: (end - start) / n };
+}
+
+/**
+ * Black-on-white QR in the `size` × `size` square at (x, y) (all white), as large as the QR_QUIET
+ * quiet zone allows; `outerLight` px of white around the square count towards it (see qrLayout).
+ * Module edges are rounded to whole pixels, so modules differ by at most 1 px but stay sharp and
+ * seamless. Returns `size`.
+ */
+export function drawQr(ctx: Pick<Ctx2D, "fillStyle" | "fillRect">, m: QrMatrix, x: number, y: number, size: number, outerLight = 0): number {
+  const { start, end } = qrLayout(m.length, size, outerLight);
+  const edge = (i: number): number => start + Math.round((i * (end - start)) / m.length);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(x, y, size, size);
   ctx.fillStyle = "#000000";

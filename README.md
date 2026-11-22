@@ -6,13 +6,24 @@ while 2-3 enemies move on rails derived from GRID data plus a bot state machine.
 
 **Play it:** https://relive-the-round.vercel.app
 
+## Features
+
+- 3D renderer (three.js, lazy chunk, quality tiers) by default, with a PixiJS 2D fallback (`?2d=1`
+  or no WebGL2); see `docs/3d-renderer.md`.
+- Rigged walking characters (CC0 Quaternius) with a distance-driven walk cycle in 3D and as 2D sprite
+  sheets; bullet tracers start at the gun muzzle.
+- Sound: Web Audio synthesized effects and generative music, no audio files. Mute with the button or
+  `M` (remembered); see `docs/audio.md`.
+- Score card with a QR challenge link, kiosk mode (`?kiosk=1`), touch controls.
+
 **Built with Junie in WebStorm:** see [`AI_SHOWCASE.md`](AI_SHOWCASE.md) for the documented Junie sessions.
 
 ## Layout
 
 - `etl/` - Python (uv) pipeline: reads GRID feeds, finds clutches, builds levels.
 - `docs/` - notes and reports (aggregates only).
-- `web/` - game client (PixiJS): playable levels, side-by-side replay, shareable score card.
+- `web/` - game client (TypeScript, Vite, three.js 3D + PixiJS 2D): playable levels, side-by-side
+  replay, shareable score card.
 
 ## Maps
 
@@ -38,6 +49,13 @@ cd etl
 uv run pytest
 STL_DATA_DIR=/path/to/grid-starter uv run relive-spike --maps haven lotus
 ```
+
+## Credits
+
+- Characters: Quaternius "Toon Shooter Game Kit", CC0
+  (<https://quaternius.com/packs/toonshootergamekit.html>); details in `docs/assets.md`.
+- Menu art, map thumbnails and the first character models were generated with Runware.
+- Fonts: Chakra Petch and JetBrains Mono (SIL OFL). Sound and music are synthesized in code.
 
 ## License
 

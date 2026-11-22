@@ -1,4 +1,5 @@
 import type { Vec2 } from "../sim/geom";
+import type { ShotEvent } from "../sim/sim";
 import { operatorSize, SPRITE_CM_PER_PX } from "./spritePose";
 
 /**
@@ -32,18 +33,59 @@ export const MUZZLE_MODEL: Readonly<Record<MuzzleRole, MuzzleOffset>> = {
   enemy: { forward: 70.4, side: 15.4, height: 118.3 },
 };
 
+const px = (forward: number, side: number): MuzzleOffset => ({ forward, side, height: 0 });
+
 /**
- * 2D gun tips in sprite px from the sprite centre (sprites face +X, y down), per art: the idle
- * cell of the walk sheets and the static sprites.
+ * 2D gun tips in sprite px from the sprite centre (sprites face +X, y down), per art: every cell
+ * of the walk sheets (index = cell, 0 idle; the gun swings with the stride) and the static
+ * sprites. Measured as the outermost opaque pixel of the barrel (alpha > 60) in each 256 px cell.
  */
+export const MUZZLE_SHEET_CELLS_PX: Readonly<Record<MuzzleRole, readonly MuzzleOffset[]>> = {
+  player: [px(104.5, 36.5), px(111.5, 48.5), px(112.5, 44), px(115.5, 28), px(116.5, 13), px(116.5, 7.5), px(116.5, 12.5), px(115.5, 30), px(112.5, 45)],
+  enemy: [px(104.5, 34), px(110.5, 47), px(112.5, 41), px(114.5, 26), px(115.5, 12), px(115.5, 6.5), px(115.5, 11), px(114.5, 28), px(112.5, 42)],
+};
+/** Idle cell of the walk sheets (the shot-frame fallback). */
 export const MUZZLE_SHEET_PX: Readonly<Record<MuzzleRole, MuzzleOffset>> = {
-  player: { forward: 104, side: 33, height: 0 },
-  enemy: { forward: 104, side: 30, height: 0 },
+  player: MUZZLE_SHEET_CELLS_PX.player[0]!,
+  enemy: MUZZLE_SHEET_CELLS_PX.enemy[0]!,
 };
 export const MUZZLE_SPRITE_PX: Readonly<Record<MuzzleRole, MuzzleOffset>> = {
-  player: { forward: 63, side: 26, height: 0 },
-  enemy: { forward: 87, side: 18, height: 0 },
+  player: px(63.5, 27),
+  enemy: px(87.5, 19),
 };
+
+/** Gun tips per frame (sprite px) for an art drawn from `frames` frames (> 1: a walk sheet). */
+export function spriteTips(art: MuzzleRole, frames: number): readonly MuzzleOffset[] {
+  return frames > 1 ? MUZZLE_SHEET_CELLS_PX[art] : [MUZZLE_SPRITE_PX[art]];
+}
+
+/**
+ * World position of the gun tip `tip` (sprite px) on a sprite drawn at (x, y) with `rotation`
+ * (rad, y-down, the art facing +X at 0) and uniform `scale` (world units per sprite px). Written
+ * into `out` and returned.
+ */
+export function spriteTipPoint(
+  x: number,
+  y: number,
+  rotation: number,
+  scale: number,
+  tip: MuzzleOffset,
+  out: { x: number; y: number } = { x: 0, y: 0 },
+): Vec2 {
+  const c = Math.cos(rotation);
+  const s = Math.sin(rotation);
+  out.x = x + (c * tip.forward - s * tip.side) * scale;
+  out.y = y + (s * tip.forward + c * tip.side) * scale;
+  return out;
+}
+
+/**
+ * Where a renderer starts the tracer of `shot`: written into `out`. The 2D sprite layer anchors it
+ * to the gun tip of the sprite as drawn this frame (its heading, walk cell and scale).
+ */
+export interface TracerOrigin {
+  tracerStart(shot: ShotEvent, out: { x: number; y: number }): Vec2;
+}
 
 /** A point-blank shot never starts past this fraction of its length. */
 export const MAX_REACH = 0.8;

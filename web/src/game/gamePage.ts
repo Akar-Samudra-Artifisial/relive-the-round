@@ -57,16 +57,18 @@ function isControl(t: EventTarget | null): boolean {
 }
 
 /**
- * Paints a QR matrix filling the canvas's content box (its CSS padding is the outer quiet zone).
- * The backing store matches the displayed device pixels, so modules stay sharp without scaling.
+ * Paints a QR matrix into the canvas's content box; its white CSS padding counts towards the quiet
+ * zone. The backing store matches the displayed device pixels, so modules stay sharp without scaling.
  */
 function paintQr(canvas: HTMLCanvasElement, m: QrMatrix): void {
   const css = getComputedStyle(canvas);
-  const content = parseFloat(css.width) - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
-  const side = Math.max(m.length, Math.round((content > 0 ? content : canvas.width) * (window.devicePixelRatio || 1)));
+  const pad = parseFloat(css.paddingLeft) || 0;
+  const content = parseFloat(css.width) - pad - (parseFloat(css.paddingRight) || 0);
+  const dpr = window.devicePixelRatio || 1;
+  const side = Math.max(m.length, Math.round((content > 0 ? content : canvas.width) * dpr));
   canvas.width = canvas.height = side;
   const ctx = canvas.getContext("2d");
-  if (ctx) drawQr(ctx, m, 0, 0, side);
+  if (ctx) drawQr(ctx, m, 0, 0, side, Math.floor(pad * dpr));
 }
 
 const REASON_TEXT: Record<ScoreCard["reason"], string> = {
