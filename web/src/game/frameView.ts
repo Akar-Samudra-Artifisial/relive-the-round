@@ -70,12 +70,18 @@ export function youFrame(world: World, timeline: readonly SimState[], t: number)
   const alive = p.hp > 0;
   if (!alive) downs.push({ x: p.x, y: p.y, side: "player", z: s.enemies.length });
   const tracers: TracerView[] = [];
+  let face: Vec2 | undefined;
   for (let k = Math.max(1, tick - TRACER_TICKS + 1); k <= tick; k++) {
     const fade = 1 - (tick - k) / TRACER_TICKS;
-    for (const shot of timeline[k]!.shots) tracers.push({ shot, fade });
+    for (const shot of timeline[k]!.shots) {
+      tracers.push({ shot, fade });
+      if (shot.by === "P0") face = shot.to;
+    }
   }
-  // The recorded round has no aim data per tick here: body only.
-  return { player: alive ? { x: p.x, y: p.y, aim: null } : null, enemies, downs, spike, tracers };
+  // The recorded round has no aim data per tick here: no cone, but while a shot of theirs is
+  // visible the body faces its target so the gun lines up with the tracer.
+  const player = alive ? (face ? { x: p.x, y: p.y, aim: null, face } : { x: p.x, y: p.y, aim: null }) : null;
+  return { player, enemies, downs, spike, tracers };
 }
 
 /** PRO replay panel at level-time t, from the event data: kills as downs, enemies without facing. */

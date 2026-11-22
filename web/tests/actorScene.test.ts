@@ -2,7 +2,8 @@ import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import { ENEMY_COLOR, ENEMY_R, ENEMY_TRACER, PLAYER_COLOR, PLAYER_TRACER } from "../src/render/actorStyle";
 import type { FrameView, TracerView } from "../src/render/renderer";
-import { ActorLayer, TRACER_Y } from "../src/render/three3d/actorScene";
+import type { ActorModels } from "../src/render/three3d/actorModels";
+import { ActorLayer, MODEL_SCALE, PLAYER_MODEL_SIZE, TRACER_Y } from "../src/render/three3d/actorScene";
 import { DEFUSE_RADIUS } from "../src/sim/constants";
 import type { ShotEvent } from "../src/sim/sim";
 import { THEME_NUM } from "../src/ui/theme";
@@ -356,5 +357,90 @@ describe("ActorLayer", () => {
     expect(spies.length).toBeGreaterThan(20);
     layer.dispose();
     for (const s of spies) expect(s).toHaveBeenCalled();
+  });
+});
+
+function fakeModels(): ActorModels {
+  const geo = (w: number, d: number): THREE.BufferGeometry => new THREE.BoxGeometry(w, 180, d).translate(0, 90, 0);
+  return {
+    operator: { geometry: geo(50, 100), map: new THREE.Texture(), height: 180, back: 50 },
+    enemy: { geometry: geo(98, 140), map: new THREE.Texture(), height: 180, back: 70 },
+  };
+}
+
+/** Direction of the model's local +Z (its facing) in world (x, z). */
+function modelFacing(o: THREE.Object3D): THREE.Vector3 {
+  o.updateWorldMatrix(true, false);
+  return new THREE.Vector3(0, 0, 1).applyQuaternion(o.getWorldQuaternion(new THREE.Quaternion()));
+}
+
+describe("ActorLayer character models", () => {
+  it("swaps the bodies to the shared model geometry and keeps the mesh names", () => {
+    const models = fakeModels();
+    const layer = new ActorLayer();
+    layer.update(base, 0);
+    expect(layer.hasModels).toBe(false);
+    layer.setModels(models);
+    layer.update(base, 16);
+    expect(layer.hasModels).toBe(true);
+    const player = one(layer, "player-body");
+    expect(player.geometry).toBe(models.operator.geometry);
+    expect(player.material).toBeInstanceOf(THREE.MeshLambertMaterial);
+    expect((player.material as unknown as THREE.MeshLambertMaterial).map).toBe(models.operator.map);
+    expect(player.scale.x).toBeCloseTo(MODEL_SCALE * PLAYER_MODEL_SIZE, 6);
+    const enemies = named(layer, "enemy-body");
+    expect(enemies).toHaveLength(2);
+    for (const e of enemies) expect(e.geometry).toBe(models.enemy.geometry);
+    expect(named(layer, "down-body")).toHaveLength(2);
+    // The nose / tick markers give way to the model's own facing.
+    expect(named(layer, "player-nose")).toHaveLength(0);
+    expect(named(layer, "enemy-tick")).toHaveLength(0);
+    // Positions are unchanged by the swap.
+    const p = worldPos(player);
+    expect([Math.round(p.x), Math.round(p.z)]).toEqual([1000, 2000]);
+    layer.dispose();
+  });
+
+  it("turns the model to the aim / facing heading", () => {
+    const layer = new ActorLayer();
+    layer.setModels(fakeModels());
+    layer.update(base, 0);
+    // Player aims at world +y -> +Z.
+    const f = modelFacing(one(layer, "player-body"));
+    expect(f.x).toBeCloseTo(0, 3);
+    expect(f.z).toBeCloseTo(1, 3);
+    layer.update({ ...base, player: { x: 1000, y: 2000, aim: { x: 1600, y: 2000 } } }, 16);
+    const g = modelFacing(one(layer, "player-body"));
+    expect(g.x).toBeCloseTo(1, 3);
+    expect(g.z).toBeCloseTo(0, 3);
+    const [e0, e1] = named(layer, "enemy-body").map(modelFacing);
+    expect(e0!.z).toBeCloseTo(1, 3);
+    expect(e1!.x).toBeCloseTo(1, 3);
+    layer.dispose();
+  });
+
+  it("does not dispose the shared model geometry or texture", () => {
+    const models = fakeModels();
+    const layer = new ActorLayer();
+    layer.setModels(models);
+    layer.update(base, 0);
+    const spies = [models.operator.geometry, models.enemy.geometry, models.operator.map!, models.enemy.map!].map((x) => vi.spyOn(x, "dispose"));
+    layer.dispose();
+    for (const s of spies) expect(s).not.toHaveBeenCalled();
+  });
+
+  it("tints the clutcher with setPlayerColor (PRO amber) and enemies red", () => {
+    const amber = 0xffb020;
+    const layer = new ActorLayer();
+    layer.setModels(fakeModels());
+    layer.update(base, 0);
+    layer.setPlayerColor(amber);
+    layer.update(base, 16);
+    const body = one(layer, "player-body").material as unknown as THREE.MeshLambertMaterial;
+    expect(body.color.getHex()).toBe(amber);
+    expect(one(layer, "player-glow").material.color.getHex()).toBe(amber);
+    const enemy = named(layer, "enemy-body")[0]!.material as unknown as THREE.MeshLambertMaterial;
+    expect(enemy.color.getHex()).toBe(ENEMY_COLOR);
+    layer.dispose();
   });
 });

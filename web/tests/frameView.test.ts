@@ -145,7 +145,9 @@ describe("youFrame", () => {
       expect(f.enemies.length + f.downs.length).toBe(s.enemies.length + (s.clutcher.hp > 0 ? 0 : 1));
       expect(f.enemies.length).toBe(s.enemies.filter((e) => e.alive).length);
       for (const e of f.enemies) expect(e).toMatchObject({ x: s.enemies[e.z!]!.x, y: s.enemies[e.z!]!.y, fx: s.enemies[e.z!]!.fx });
-      if (f.player) expect(f.player).toEqual({ x: s.clutcher.x, y: s.clutcher.y, aim: null });
+      // No aim cone; the body faces the target of the latest own shot still drawn as a tracer.
+      const own = f.tracers.filter((tr) => tr.shot.by === "P0").at(-1);
+      if (f.player) expect(f.player).toEqual({ x: s.clutcher.x, y: s.clutcher.y, aim: null, ...(own ? { face: own.shot.to } : {}) });
       expect(zOrdered(f)).toBe(true);
       if (f.spike) {
         expect(f.spike).toEqual({ x: world.spike!.x, y: world.spike!.y, defuse: s.clutcher.defuseTicks / FULL, pulseT: null });
@@ -243,7 +245,7 @@ describe("frame view purity", () => {
 describe("renderer seam", () => {
   const sources = import.meta.glob("../src/**/*.ts", { query: "?raw", import: "default", eager: true });
   const pixiAllowed = (file: string): boolean =>
-    ["../src/render/pixi2d.ts", "../src/render/mapView.ts", "../src/render/actors.ts", "../src/main.ts"].includes(file) || file.startsWith("../src/debug/");
+    ["../src/render/pixi2d.ts", "../src/render/mapView.ts", "../src/render/actors.ts", "../src/render/actorSprites.ts", "../src/main.ts"].includes(file) || file.startsWith("../src/debug/");
 
   it("only the Pixi renderer files (and main.ts for unsafe-eval, plus the dev debug page) import pixi.js", () => {
     const users = Object.entries(sources)

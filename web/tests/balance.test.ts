@@ -33,7 +33,9 @@ function fmt(r: BalanceRow): string {
  */
 const LOCKED_WIN_RATE: Readonly<Record<string, number>> = {
   df244e8f378d: 0.38,
-  "010a7b04f8c3": 0.6,
+  // 0.6 → 0.44 when the player run speed rose to 620 cm/s (PLAYER_RUN_SPEED): the autopilot
+  // arrives at its fights at different moments, still inside the 25–65% target.
+  "010a7b04f8c3": 0.44,
   bc9dc2b1daac: 0.38,
   // Cistern
   "1273a6914b4e": 0.42,

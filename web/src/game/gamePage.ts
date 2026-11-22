@@ -1,3 +1,6 @@
+import { createGameAudio } from "../audio";
+import { soundCounts } from "../audio/debugCounts";
+import { isMuteKey } from "../audio/keys";
 import { mapFor } from "../maps";
 import { createFpsWatchdog } from "../render/fpsWatchdog";
 import { createPixi2dRenderer } from "../render/pixi2d";
@@ -11,7 +14,7 @@ import { ensureFonts, prefersReducedMotion } from "../ui/fonts";
 import { clockAt, NO_INPUT, simTimeAt, type Input, type SimState } from "../sim/sim";
 import { buildWorld, type World } from "../sim/world";
 import { createAutopilot, type Autopilot } from "./autopilot";
-import { qrMatrix, renderCard, type QrMatrix } from "./cardImage";
+import { drawQr, qrMatrix, renderCard, type QrMatrix } from "./cardImage";
 import { challengeLines, landingAction, replayKeyAction } from "./challengeLanding";
 import { createFrameLoop } from "./frameLoop";
 import { liveFrame, TRACER_MS, type LiveTracer } from "./frameView";
@@ -19,7 +22,7 @@ import { blocksDefault, mapInput, type Screen } from "./input";
 import { attractSlide, CornerTaps, isResetChord, kioskScoreDeadline, parseKiosk, RESET_CONFIRM_S } from "./kiosk";
 import { addEntry, clearEntries, normalizeInitials, topEntries, validInitials } from "./leaderboard";
 import { FEATURED, loadFeatured, type LoadedLevel } from "./levels";
-import { buildYouTimeline, replayLayout } from "./replayModel";
+import { buildYouTimeline, replayLayout, tickAtTime } from "./replayModel";
 import { ReplayPlayer, type ReplaySpeed } from "./replayPlayer";
 import { scoreRound, type ScoreCard } from "./score";
 import { Session } from "./session";
@@ -53,21 +56,17 @@ function isControl(t: EventTarget | null): boolean {
   return t instanceof HTMLButtonElement || t instanceof HTMLInputElement;
 }
 
-/** Paints a QR matrix (with a 4-module quiet zone) onto a small canvas, whole pixels per module. */
+/**
+ * Paints a QR matrix filling the canvas's content box (its CSS padding is the outer quiet zone).
+ * The backing store matches the displayed device pixels, so modules stay sharp without scaling.
+ */
 function paintQr(canvas: HTMLCanvasElement, m: QrMatrix): void {
+  const css = getComputedStyle(canvas);
+  const content = parseFloat(css.width) - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+  const side = Math.max(m.length, Math.round((content > 0 ? content : canvas.width) * (window.devicePixelRatio || 1)));
+  canvas.width = canvas.height = side;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const n = m.length + 8;
-  const cell = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / n));
-  const off = Math.floor((canvas.width - cell * n) / 2);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#000000";
-  m.forEach((row, r) =>
-    row.forEach((dark, c) => {
-      if (dark) ctx.fillRect(off + (c + 4) * cell, off + (r + 4) * cell, cell, cell);
-    }),
-  );
+  if (ctx) drawQr(ctx, m, 0, 0, side);
 }
 
 const REASON_TEXT: Record<ScoreCard["reason"], string> = {
@@ -257,8 +256,41 @@ export async function startGame(): Promise<void> {
   const replayToggle = el<HTMLButtonElement>("replayToggle");
   const speedButtons = [...replayBar.querySelectorAll<HTMLButtonElement>("button[data-speed]")];
   const shareMsg = el<HTMLParagraphElement>("shareMsg");
+  /** YOU-panel states of the open replay (index = tick) and its speed, for replay sounds. */
+  let replayTimeline: readonly SimState[] = [];
+  let replaySpeed: ReplaySpeed = 1;
+
+  // Sound: synthesized at runtime, silent until the first user gesture unlocks it.
+  const muteBtn = el<HTMLButtonElement>("muteToggle");
+  const showMuted = (muted: boolean): void => {
+    muteBtn.setAttribute("aria-pressed", String(muted));
+    muteBtn.title = muted ? "Sound off (M)" : "Sound on (M)";
+  };
+  const audio = createGameAudio({
+    search: location.search,
+    kiosk: kiosk.enabled,
+    storage: (() => {
+      try {
+        return localStorage;
+      } catch {
+        return null;
+      }
+    })(),
+    onChange: (s) => showMuted(s.muted),
+  });
+  showMuted(audio.settings.muted);
+  muteBtn.addEventListener("click", (e) => {
+    audio.toggleMute();
+    // After a pointer click Space (the fire key) must not toggle the button again.
+    if (e.detail > 0) muteBtn.blur();
+  });
+  // Bubble phase: clicks the kiosk swallows in the capture phase stay silent too.
+  gameEl.addEventListener("click", (e) => {
+    if (e.target instanceof Element && e.target.closest("button")) audio.click();
+  });
 
   const show = (next: Screen): void => {
+    audio.setScene(next);
     screen = next;
     gameEl.dataset.screen = next;
     attract.hidden = next !== "attract";
@@ -287,6 +319,9 @@ export async function startGame(): Promise<void> {
   };
   addEventListener("pointerdown", (e) => inputEvent(e.pointerType === "touch" ? "touch" : e.pointerType === "pen" ? "pen" : "mouse"), { capture: true });
   addEventListener("keydown", () => inputEvent("key"), { capture: true });
+  // Audio unlock must run inside a user gesture; registered before the kiosk handlers that may
+  // stop the event.
+  for (const type of ["pointerdown", "pointerup", "keydown", "touchend"]) addEventListener(type, () => audio.unlock(), { capture: true });
 
   /** Top-5 rows for the level select and the kiosk attract loop (fresh nodes per call). */
   const boardRows = (): HTMLLIElement[] => {
@@ -409,6 +444,7 @@ export async function startGame(): Promise<void> {
     }
     replay = null;
     replayEnded = false;
+    replayTimeline = [];
   };
 
   const toAttract = (): void => {
@@ -499,6 +535,7 @@ export async function startGame(): Promise<void> {
 
   const setReplaySpeed = (speed: ReplaySpeed): void => {
     replay?.setSpeed(speed);
+    replaySpeed = speed;
     for (const b of speedButtons) b.setAttribute("aria-pressed", String(b.dataset.speed === String(speed)));
   };
 
@@ -506,6 +543,7 @@ export async function startGame(): Promise<void> {
     if (!finished || !card || screen !== "score") return;
     closeReplay();
     const timeline = buildYouTimeline(finished.world, finished.seed, finished.recording);
+    replayTimeline = timeline;
     // Two square panels as large as the viewport allows (minus the replay bar), side by side or
     // stacked on portrait phones; CSS centres canvas + bar vertically. Measured before the first paint.
     replayBar.hidden = false;
@@ -626,7 +664,10 @@ export async function startGame(): Promise<void> {
   el<HTMLButtonElement>("downloadCard").addEventListener("click", () => void downloadCard());
   replayToggle.addEventListener("click", () => setReplayPlaying(!(replay?.isPlaying ?? false)));
   for (const b of speedButtons) b.addEventListener("click", () => setReplaySpeed(Number(b.dataset.speed) as ReplaySpeed));
-  replaySlider.addEventListener("input", () => replay?.setTime(Number(replaySlider.value)));
+  replaySlider.addEventListener("input", () => {
+    replay?.setTime(Number(replaySlider.value));
+    audio.scrub(performance.now());
+  });
   el<HTMLButtonElement>("replayExit").addEventListener("click", backToScore);
   addEventListener("hashchange", () => {
     // A booth machine never opens challenge links.
@@ -771,6 +812,10 @@ export async function startGame(): Promise<void> {
     // A held Enter/Space must not chain screens (e.g. save → attract → random level).
     // A focused button activates itself on Enter; the global shortcut must not fire as well.
     const onButton = e.target instanceof HTMLButtonElement;
+    if (isMuteKey(e, e.target instanceof HTMLElement ? e.target : null)) {
+      audio.toggleMute();
+      return;
+    }
     if (e.repeat && (e.key === "Enter" || e.code === "Space")) {
       // Auto-repeat would click the freshly focused button (Watch replay / Beat this) over and over.
       if (onButton) e.preventDefault();
@@ -847,6 +892,7 @@ export async function startGame(): Promise<void> {
     el<HTMLDivElement>("countdownNum").textContent = String(cd);
     const s = session.state;
     if (s.tick !== before) for (const shot of s.shots) tracers.push({ shot, untilMs: nowMs + TRACER_MS });
+    audio.onPlay({ session, countdown: cd, state: s, clock: clockAt(world, simTimeAt(world, s.tick)), nowMs });
     tracers = tracers.filter((tr) => tr.untilMs > nowMs);
 
     // Fog of war, defuse arcs and tracer fade are decided in liveFrame; the renderer only draws.
@@ -896,6 +942,17 @@ export async function startGame(): Promise<void> {
     if (watchdog.sample(nowMs) === "degrade") degradeQuality();
   };
 
+  /**
+   * YOU-panel shots and kills while the replay plays normally at 1x/2x. Slider and key seeks
+   * happen outside `update`, so a frame's own advance is never a scrub jump.
+   */
+  const replaySounds = (fromT: number, toT: number): void => {
+    if (replaySpeed > 2 || !finished || replayTimeline.length === 0) return;
+    const a = tickAtTime(finished.world, fromT, replayTimeline.length);
+    const b = tickAtTime(finished.world, toT, replayTimeline.length);
+    if (b > a && b - a <= 4) audio.onReplay(replayTimeline[a]!.stats, replayTimeline[b]!.stats);
+  };
+
   // The only animation loop on the page: game logic, replay playback, one render, then the HUD.
   const loop = createFrameLoop((deltaMS, nowMs) => {
     fpsAcc += deltaMS;
@@ -906,7 +963,10 @@ export async function startGame(): Promise<void> {
       fpsFrames = 0;
     }
     const played = step(deltaMS, nowMs);
+    const replayFrom = screen === "replay" && replay ? replay.time : null;
     replay?.update(deltaMS);
+    if (replay && replayFrom !== null) replaySounds(replayFrom, replay.time);
+    audio.frame();
     // The canvas is hidden on the attract and idle screens; the score screen keeps the last live frame.
     const frames = screen === "replay" && replay ? replay.frames() : (screen === "play" || screen === "score") && lastLive ? [lastLive] : null;
     feedWatchdog(nowMs, frames !== null);
@@ -934,6 +994,7 @@ export async function startGame(): Promise<void> {
           return ext != null;
         },
         quality: () => ({ tier, kind: renderer.kind }),
+        sounds: (): Record<string, number> => ({ ...soundCounts }),
       },
     });
   }

@@ -592,6 +592,28 @@ kbd {
 
 #fps { position: fixed; right: 8px; bottom: 6px; color: var(--green); font: 400 var(--fs-xs)/1 var(--font-mono); }
 
+/* ---------- mute toggle (top-right; top-left is the kiosk operator tap zone) ---------- */
+#game #muteToggle {
+  position: fixed;
+  top: var(--s-2);
+  right: var(--s-2);
+  z-index: 5;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0;
+  --btn-bg: rgb(15 23 32 / 0.8);
+}
+#game #muteToggle[aria-pressed="true"] { --btn-bg: rgb(15 23 32 / 0.8); --btn-fg: var(--text-dim); --btn-line: var(--line-hi); }
+#muteToggle svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#muteToggle .spk { fill: currentColor; }
+#muteToggle .cross, #muteToggle[aria-pressed="true"] .waves { display: none; }
+#muteToggle[aria-pressed="true"] .cross { display: inline; }
+/* The play HUD spans the width on narrow screens: keep the button's corner free on both sides. */
+@media (max-width: 1080px) {
+  #game[data-screen="play"] #hud { width: min(100% - 2 * var(--s-3) - 2 * 48px, 960px); }
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 860px) {
   .menu { grid-template-columns: minmax(0, 1fr); grid-template-areas: "brand" "challenge" "intro" "levels" "side"; }

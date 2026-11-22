@@ -52,6 +52,9 @@ Each file is one mesh, one material, one texture.
 | `crate.glb` | 4103 | 1,940 | 98.2 KB | 81.6 × 80 × 81.6 | Olive supply crate with steel corners; symmetric. |
 | `barrel.glb` | 4104 | 1,938 | 91.8 KB | 59.8 × 90 × 60 | Rust-orange steel drum; symmetric. |
 
+| `operator-rifle.glb` | 4201 | 3,830 | 159.9 KB | 49 × 180 × 102.6 | Operator holding a rifle; rifle muzzle points +Z (the raw TRELLIS model had it on +X, baked with a −90° Y rotation). Light grey albedo, dark visor. |
+| `enemy.glb` | 4203 | 3,830 | 213.0 KB | 97.9 × 180 × 140.8 | Heavy armoured trooper with backpack (bulky, hooded helmet, wide pauldrons); SMG points +Z, backpack on −Z (no rotation needed). Dark grey gun in albedo. Top-down texture has dark blotches on the pauldrons (not visible in the concept). |
+
 Sizes are `ls -l` of the final files; triangle counts are from `gltf-transform inspect`.
 
 Concept prompts (`runware:z-image@0`, 1024×1024, no negative prompt):
@@ -76,6 +79,39 @@ Concept prompts (`runware:z-image@0`, 1024×1024, no negative prompt):
   logos, clean silhouette, soft even studio lighting, plain pure white background, centered, single
   object
 
+Character pass (branch `feat/character-art`, same pipeline and TRELLIS settings, `seed: 7`; triangle
+budget 3,950 → 3,830 after simplify; the concept prompts were written for this pass):
+
+- Operator with rifle (concept seed 4201): same prompt as the Operator above but "holding a rifle in
+  both hands pointing straight forward at chest height, rifle clearly visible with a long barrel and
+  stock" instead of "no weapon".
+- Enemy (concept seed 4203, final): 3D game asset render of a generic heavy armored trooper character
+  standing upright, strict side profile view facing right, whole body turned to the right, full body
+  from helmet to boots, bulky silhouette with oversized rounded shoulder pauldrons, tall angular
+  hooded helmet with a narrow dark visor slit, large backpack on the back, thick armored arms and legs,
+  holding a short compact submachine gun with a long curved magazine in both hands pointing straight
+  to the right, matte light grey and off-white armor, no logos, no text, no insignia, clean readable
+  silhouette, simple stylized shapes, soft even studio lighting, plain pure white background,
+  centered, single character. Attempt 1 (seed 4202, three-quarter view, same prompt otherwise) was
+  discarded: the gun pointed diagonally and the torso faced sideways to it.
+
+Top-down sprites (`web/public/sprites/operator.webp`, `enemy.webp`, 256×256, transparent): each final
+GLB rendered offline from straight above with a three.js orthographic camera in headless Chrome
+(ambient 1.6 + top directional 1.6, material colour forced white, so `sprite.tint` works). Model +Z
+points to image +X (rifle to the right). Scale 0.8 cm/px for both (256 px = 204.8 cm), centred on the
+footprint bounding box. Operator footprint 128×62 px, enemy 176×124 px. Sprite WebP quality 90.
+The files are stored as rendered; at load time the 2D renderer lifts their grey levels to 0.62..1
+(`liftLevels` in `web/src/render/spritePose.ts`) so the role tint stays bright and dark patches vanish.
+
+Attempts and cost, character pass (actual `cost`, USD):
+
+| Asset | Concept | 3D | Total |
+| --- | --- | --- | --- |
+| operator-rifle | 0.0104 | 0.0149 | 0.0253 |
+| enemy attempt 1 (discarded) | 0.0104 | 0.0268 | 0.0372 |
+| enemy attempt 2 (final) | 0.0119 | 0.0208 | 0.0327 |
+| **Total** | 0.0327 | 0.0625 | **0.0952** |
+
 Attempts and cost (actual `cost` returned by the API, USD): one attempt per asset, no retries.
 
 | Asset | Concept (`runware:z-image@0`) | 3D (`microsoft:trellis-2@4b`) | Total |
@@ -85,6 +121,39 @@ Attempts and cost (actual `cost` returned by the API, USD): one attempt per asse
 | crate | 0.0104 | 0.0551 | 0.0655 |
 | barrel | 0.0104 | 0.0253 | 0.0357 |
 | **Total** | 0.0416 | 0.1265 | **0.1681** |
+
+### Walk animation characters (CC0)
+
+`web/public/models/operator-rifle-rig.glb`, `enemy-rig.glb` and the sheets
+`web/public/sprites/operator-walk.webp`, `enemy-walk.webp` replace rigging our own Runware models.
+The static models and sprites above stay as the fallback.
+
+- Source: Quaternius "Toon Shooter Game Kit" (<https://quaternius.com/packs/toonshootergamekit.html>,
+  badge CC0, "free to use in personal and commercial projects"). The pack's Google Drive folder hit
+  its download quota, so the glTFs came from the Poly Pizza mirror (<https://poly.pizza/m/PpLF4rt4ah>
+  `Character Soldier` and <https://poly.pizza/m/mdGe4IN31v> `Character Enemy`, both "Public Domain
+  (CC0)"). No attribution required; credit: Quaternius.
+- Characters: player = `Character_Soldier` with the AK; enemy = `Character_Enemy` with the SMG.
+  Both share one 43-bone rig. Only `Character_Enemy` ships a plain `Walk`, so the soldier gets the
+  `Walk` and `Idle` tracks copied by bone name (inverse bind matrices are identical, rest pose copied
+  from the enemy file). Clips are renamed `walk` (1.0 s) and `idle` (1.67 s). Tracks are in place
+  (no Root/translation drift). The gun arm is not animated in `Walk`, so the rifle stays in the hand.
+- Processing (`<tmp>/tools/build.mjs`, `@gltf-transform/core` + `functions`, `meshoptimizer`, `sharp`):
+  rigid weapon/head/pad meshes are baked into the skinned mesh (weights 1.0 on the parent bone, vertex
+  = inverse-bind x local matrix); all flat materials become a 128x128 palette PNG (8 px cells,
+  nearest filter, one `Palette` material, UV at cell centres); `weld` + `simplify` (ratio 0.58
+  soldier, 0.72 enemy, error 0.01); weights u8-normalised, joints u8; `RootNode` scaled 0.82 so the
+  height is 1.8 and the feet sit at y=0. Facing +Z. No extensions.
+- Stats: operator-rifle-rig 4,030 tris, 243 KB; enemy-rig 4,032 tris, 189 KB. Each is one
+  SkinnedMesh with one material and 43 joints. Palette colours are the pack's own and fairly dark
+  (soldier olive 0.11/0.15/0.04 linear), so a role tint multiplies to a dark result; lift the texture
+  like `liftLevels` does for the sprites.
+- Sprite sheets: 768x768, 3x3 of 256 px cells, cell 0 = `idle`, cells 1..8 = `walk` at k/8 of the
+  duration. Same renderer as the static sprites (headless Chrome, three.js, ortho camera straight
+  above, material forced white). Lights ambient 0.9 + top directional 0.9, 0.8 cm/px, fixed
+  centre on the footprint of all nine frames, model +Z to image +X. WebP quality 90:
+  operator 18.8 KB, enemy 17.2 KB. From above the legs are mostly hidden under the body, so the
+  walk reads through the arm and shoulder swing.
 
 Licences (checked 2026-11-22):
 

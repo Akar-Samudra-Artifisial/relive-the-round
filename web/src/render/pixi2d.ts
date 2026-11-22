@@ -4,7 +4,9 @@ import type { MapDef } from "../maps/types";
 import type { Vec2 } from "../sim/geom";
 import { DISPLAY_FONT, MONO_FONT } from "../ui/fonts";
 import { THEME_NUM } from "../ui/theme";
-import { drawFrame } from "./actors";
+import { drawFrameUnder, drawTracers } from "./actors";
+import { destroySpriteTextures, loadSpriteTextures, SpriteLayer, type SpriteTextures } from "./actorSprites";
+import { PLAYER_COLOR } from "./actorStyle";
 import { drawMap } from "./mapView";
 import { fieldRect, HEADER_H } from "./panelLayout";
 import type { FrameView, GameRenderer, PanelSpec } from "./renderer";
@@ -30,11 +32,39 @@ export class Pixi2dRenderer implements GameRenderer {
   private map: MapDef | null = null;
   private mapOpts: { cssPxPerUnit?: number } = {};
   private specs: readonly PanelSpec[] = [];
-  private panels: { readonly view: Container; readonly dyn: Graphics }[] = [];
+  /**
+   * Per panel, bottom to top: map, `under` (spike, glows, cones, down marks, and the body circles
+   * while no sprites are loaded), `sprites` (character sprites, null until loaded), `over` (tracers).
+   */
+  private panels: {
+    readonly view: Container;
+    readonly under: Graphics;
+    readonly sprites: SpriteLayer | null;
+    readonly over: Graphics;
+    readonly color: number;
+  }[] = [];
   private dirty = false;
+  private textures: SpriteTextures | null = null;
+  private destroyed = false;
+  private readonly motionQuery = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
 
   /** Use `createPixi2dRenderer` (Pixi init is async). */
-  constructor(private readonly app: Application) {}
+  constructor(private readonly app: Application) {
+    // Character sprites are optional: on failure the Graphics bodies stay, with one warning.
+    loadSpriteTextures().then(
+      (textures) => {
+        if (this.destroyed) {
+          destroySpriteTextures(textures);
+          return;
+        }
+        this.textures = textures;
+        this.dirty = true;
+      },
+      (err: unknown) => {
+        console.warn("[2d] character sprites unavailable, keeping circle bodies:", err instanceof Error ? err.message : err);
+      },
+    );
+  }
 
   get canvas(): HTMLCanvasElement {
     return this.app.canvas;
@@ -57,10 +87,17 @@ export class Pixi2dRenderer implements GameRenderer {
 
   draw(frames: readonly FrameView[]): void {
     if (this.dirty) this.rebuild();
-    this.panels.forEach(({ dyn }, i) => {
-      dyn.clear();
+    const now = performance.now();
+    const reduced = this.motionQuery?.matches ?? false;
+    this.panels.forEach(({ under, sprites, over, color }, i) => {
+      under.clear();
+      over.clear();
       const f = frames[i];
-      if (f) drawFrame(dyn, f);
+      if (sprites) sprites.container.visible = f !== undefined;
+      if (!f) return;
+      drawFrameUnder(under, f, { bodies: sprites === null, playerColor: color });
+      sprites?.update(f, now, reduced, color);
+      drawTracers(over, f, sprites?.muzzles ?? null);
     });
     this.app.render();
   }
@@ -80,8 +117,12 @@ export class Pixi2dRenderer implements GameRenderer {
   }
 
   destroy(): void {
+    // Sprites go with the stage; the textures are owned by this renderer.
+    this.destroyed = true;
     this.panels = [];
     this.app.destroy({ removeView: true }, { children: true });
+    if (this.textures) destroySpriteTextures(this.textures);
+    this.textures = null;
   }
 
   private rebuild(): void {
@@ -95,12 +136,16 @@ export class Pixi2dRenderer implements GameRenderer {
       const fieldArea = fieldRect(spec);
       const view = new Container();
       view.position.set(spec.x, spec.y);
-      const dyn = new Graphics();
+      const under = new Graphics();
+      const over = new Graphics();
+      const sprites = this.textures ? new SpriteLayer(this.textures) : null;
       const field = new Container();
       field.position.set(0, fieldArea.y - spec.y);
       field.scale.set(scale);
       // Without an explicit value logical px == CSS px (the replay canvas is sized to the viewport).
-      field.addChild(drawMap(map, { cssPxPerUnit: this.mapOpts.cssPxPerUnit ?? scale }), dyn);
+      field.addChild(drawMap(map, { cssPxPerUnit: this.mapOpts.cssPxPerUnit ?? scale }), under);
+      if (sprites) field.addChild(sprites.container);
+      field.addChild(over);
       if (spec.title !== undefined) {
         const accent = spec.accent ?? THEME_NUM.cyan;
         const fieldPx = spec.size;
@@ -132,7 +177,8 @@ export class Pixi2dRenderer implements GameRenderer {
         view.addChild(field);
       }
       this.app.stage.addChild(view);
-      this.panels.push({ view, dyn });
+      // YOU stays cyan, PRO gets its amber panel accent.
+      this.panels.push({ view, under, sprites, over, color: spec.accent ?? PLAYER_COLOR });
     }
   }
 }

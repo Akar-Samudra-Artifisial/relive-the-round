@@ -6,6 +6,8 @@ import { fieldRect, glViewport, panelAt, type Rect } from "../panelLayout";
 import { pixelRatioFor, QUALITY, type QualityTier } from "../quality";
 import type { FrameView, GameRenderer, PanelSpec } from "../renderer";
 import { CONTEXT_LOST } from "../switchable";
+import { PLAYER_COLOR } from "../actorStyle";
+import { type ActorModels, disposeActorModels, loadActorModels } from "./actorModels";
 import { ActorLayer } from "./actorScene";
 import { type CameraFit, fitCamera, groundPoint, ndcFromClient } from "./camMath";
 import { makeCanvasLabel } from "./labels";
@@ -45,6 +47,9 @@ export class Three3dRenderer implements GameRenderer {
   private panels: readonly PanelSpec[] = [];
   private cssW: number;
   private cssH: number;
+  /** Character models shared by every layer; null until loaded (layers show cylinders meanwhile). */
+  private models: ActorModels | null = null;
+  private readonly motionQuery = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
 
   constructor(opts: Three3dOptions) {
     this.tier = opts.tier ?? "high";
@@ -74,6 +79,7 @@ export class Three3dRenderer implements GameRenderer {
     this.scene.add(this.lights.hemi, this.lights.sun, this.lights.sun.target, this.shadowPlane);
     this.scene.add(this.layers[0]!.group);
     this.applyShadows(QUALITY[this.tier].shadows, false);
+    this.loadModels();
   }
 
   get quality(): QualityTier {
@@ -118,6 +124,7 @@ export class Three3dRenderer implements GameRenderer {
     const count = Math.max(1, this.panels.length);
     while (this.layers.length < count) {
       const layer = new ActorLayer();
+      if (this.models) layer.setModels(this.models);
       this.layers.push(layer);
       this.scene.add(layer.group);
     }
@@ -126,6 +133,8 @@ export class Three3dRenderer implements GameRenderer {
       this.scene.remove(layer.group);
       layer.dispose();
     }
+    // YOU stays cyan, PRO gets its amber panel accent.
+    this.layers.forEach((layer, i) => layer.setPlayerColor(this.panels[i]?.accent ?? PLAYER_COLOR));
     this.updateFits();
     this.rebuildHud();
   }
@@ -135,7 +144,11 @@ export class Three3dRenderer implements GameRenderer {
     this.renderer.setScissorTest(false);
     this.renderer.setViewport(0, 0, this.cssW, this.cssH);
     this.renderer.clear();
-    for (const layer of this.layers) layer.group.visible = false;
+    const reduced = this.motionQuery?.matches ?? false;
+    for (const layer of this.layers) {
+      layer.group.visible = false;
+      layer.reducedMotion = reduced;
+    }
     const now = performance.now();
     try {
       for (let i = 0; i < this.viewports.length; i++) {
@@ -201,9 +214,33 @@ export class Three3dRenderer implements GameRenderer {
       this.scene.remove(layer.group);
       layer.dispose();
     }
+    // Layers never dispose the shared model geometry/texture: the renderer owns them.
+    if (this.models) disposeActorModels(this.models);
+    this.models = null;
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     this.canvas.remove();
+  }
+
+  /**
+   * Fetches the character models once (async, never blocks the first frame). Failure keeps the
+   * cylinders with a single warning; a load finishing after destroy()/failure is disposed at once.
+   */
+  private loadModels(): void {
+    loadActorModels().then(
+      (models) => {
+        if (this.failed) {
+          disposeActorModels(models);
+          return;
+        }
+        this.models = models;
+        // The new materials compile on first use with the current shadow setting.
+        for (const layer of this.layers) layer.setModels(models);
+      },
+      (err: unknown) => {
+        console.warn("[3d] character models unavailable, keeping primitive bodies:", err instanceof Error ? err.message : err);
+      },
+    );
   }
 
   private fail(reason: string): void {

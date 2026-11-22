@@ -57,21 +57,30 @@ function makeCanvas(): { ctx: Ctx2D; toBlob: () => Promise<Blob> } {
   };
 }
 
-/** Pure black-on-white QR with a 4-module quiet zone; returns the drawn side length (px). */
-function drawQr(ctx: Ctx2D, m: QrMatrix, x: number, y: number, size: number): number {
-  const quiet = 4;
-  const n = m.length + quiet * 2;
-  const cell = Math.floor(size / n);
-  const px = cell * n;
+/** Quiet zone (modules) drawn inside the QR square; the white plate or padding around it adds more. */
+export const QR_QUIET = 2;
+
+/**
+ * Black-on-white QR filling the whole `size` × `size` square at (x, y), with a QR_QUIET-module quiet
+ * zone. Module edges are rounded to whole pixels, so modules differ by at most 1 px but stay sharp
+ * and seamless (no integer-cell leftover margin). Returns `size`.
+ */
+export function drawQr(ctx: Pick<Ctx2D, "fillStyle" | "fillRect">, m: QrMatrix, x: number, y: number, size: number): number {
+  const n = m.length + QR_QUIET * 2;
+  const edge = (i: number): number => Math.round(((i + QR_QUIET) * size) / n);
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(x, y, px, px);
+  ctx.fillRect(x, y, size, size);
   ctx.fillStyle = "#000000";
-  m.forEach((row, r) =>
+  m.forEach((row, r) => {
+    const y0 = edge(r);
+    const y1 = edge(r + 1);
     row.forEach((dark, c) => {
-      if (dark) ctx.fillRect(x + (c + quiet) * cell, y + (r + quiet) * cell, cell, cell);
-    }),
-  );
-  return px;
+      if (!dark) return;
+      const x0 = edge(c);
+      ctx.fillRect(x + x0, y + y0, edge(c + 1) - x0, y1 - y0);
+    });
+  });
+  return size;
 }
 
 /** Bevelled panel (cut top-right / bottom-left corners), the HUD panel shape from theme.css. */

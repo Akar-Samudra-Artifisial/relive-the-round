@@ -666,3 +666,168 @@ The entry grows by +49 B raw / +18 B gzip over phase 7. three stays in the lazy 
   and requests only the phase 0 probe chunk. `__rtr.quality()` reports `high` / 3d on desktop,
   `low` with `?quality=low`, and `medium` under a 390x844 touch emulation (`pointer: coarse`).
   No application errors in the console. The no-WebGL2 path is covered by `select.test.ts` only.
+
+## Character models
+
+The actor bodies are character models (3D) and top-down sprites (2D) instead of cylinders and
+circles. The assets and how they were made are described in `docs/assets.md`; the primitives stay
+as the fallback, so nothing breaks when an asset is missing.
+
+**Loading.**
+
+- 3D: `render/three3d/actorModels.ts` loads `models/operator-rifle.glb` (falls back to
+  `models/operator.glb`) and `models/enemy.glb` (falls back to the operator model) once per
+  `Three3dRenderer`, from `import.meta.env.BASE_URL`. `GLTFLoader` is a static import inside the
+  lazy three3d chunk. Embedded textures are loaded through `TextureLoader` (an `<img>`), because
+  the default `ImageBitmapLoader` `fetch()`es the `blob:` URL, which `connect-src 'self'` blocks.
+  The first mesh is baked to world space, recentred on x/z with its base on y = 0.
+- 2D: `render/actorSprites.ts` loads `sprites/operator.webp` and `sprites/enemy.webp` as plain
+  `<img>` elements wrapped in a Pixi `ImageSource` (Pixi `Assets` would add ~17 KB gzip to the
+  initial download).
+- Until the assets arrive the old primitives are drawn. A failed load logs one `console.warn`
+  (`[3d] character models unavailable …` / `[2d] character sprites unavailable …`) and the
+  primitives stay. A load that resolves after `destroy()` (or after the 3D renderer failed) is
+  disposed at once.
+
+**Ownership.** The model geometry and texture (3D) and the sprite textures (2D) belong to the
+renderer and are shared by its panels; the renderer disposes them in `destroy()`. Each `ActorLayer`
+owns its four tinted `MeshLambertMaterial`s (player, enemy, player down, enemy down), so shadows and
+the quality recompile keep working, and `ActorLayer.dispose()` never touches the shared geometry.
+
+**Motion** (`render/actorMotion.ts`, pure, shared by both renderers). Frames only carry positions, so
+`MotionTracker` derives speed from the position delta and keys actors by identity (player, enemy
+`z`). A key that was not seen in the previous frame or jumps more than 3 × the fastest run speed (`PLAYER_RUN_SPEED`) per second
+(at least 150 cm; a kill shifting `z`, a replay scrub) is reset instead of reporting a huge speed.
+
+- Heading: aim / view facing when known, else the movement direction (smoothed), else the last
+  heading.
+- Footstep bob `|sin|` over a 120 cm stride, scaled by speed; forward lean up to 0.12 rad.
+- Downs fall over 400 ms (`FALL_MS`; 250 ms was too quick to read in the split-screen replay); downs already present on the first frame start lying; the
+  yaw comes from a hash of the down position.
+- `prefers-reduced-motion: reduce` snaps heading and falls and drops bob and lean.
+
+**3D placement.** Each actor slot is `group → pivot → body`. The pivot yaw is `π/2 − heading` (the
+models face +Z); the body bobs up to `MODEL_BOB` = 6 cm and leans forward. A down lies flat
+(`rotation.x → −π/2` over the fall) with a darker material (`DOWN_DARK`); the ring and the X stay.
+`MODEL_SCALE` = 2.6 (models are ~180 cm tall, so ~470 cm on screen); the clutcher (YOU/PRO, standing and
+down) gets an extra `PLAYER_MODEL_SIZE` = 1.3 because the operator mesh read smaller than the enemy. The nose and the enemy tick hide when models are
+shown; the aim cone, view cone and glow stay. Bodies cast shadows (still only on the high tier).
+Mesh names `player-body` / `enemy-body` are unchanged; downs gain a `down-body` mesh.
+
+**2D placement** (`render/spritePose.ts`, pure). Sprite rotation = heading (Pixi and the world share
+y-down axes), scale = `SPRITE_CM_PER_PX` (2.6 cm per sprite pixel; the sprites are authored at
+0.8 cm/px, so they are drawn 3.25× for readability next to the 120 cm actor rings) × (1 ± 3 % bob).
+The operator is drawn `OPERATOR_SIZE` (1.35×) larger, since its render footprint is smaller than the
+enemy's. On load each sprite's grey levels are remapped to `SPRITE_FLOOR`..1 (0.62, `liftLevels`
+on a canvas copy): tinting multiplies, so the dark operator render would otherwise turn cyan into
+near black and dark texture patches on the enemy pauldrons into blotches. In sprite mode the
+clutcher also gets a role-coloured footing ring (1.25 × `PLAYER_R`). Downs fade to alpha 0.5 and
+darken to 40 %. Panel layer order: map → Graphics under (spike, glow,
+cones, rings) → sprites → Graphics over (tracers).
+
+**Tint.** The assets are light grey and tinted per role: YOU cyan, enemies red, and in the replay
+the PRO panel's clutcher is amber (the panel accent, via `ActorLayer.setPlayerColor` in 3D and the
+panel colour in 2D). Before this change the PRO body was cyan in both panels.
+
+**Sizes** after `pnpm -C web build:public` (gzip = `gzip -9`):
+
+| Chunk | Raw bytes | Gzip bytes | Δ gzip |
+| --- | ---: | ---: | ---: |
+| `index-*.js` (entry) | 408,784 | 125,613 | +1,723 |
+| `three3d-*.js` (renderer, lazy) | 73,082 | 22,707 | +14,503 (GLTFLoader) |
+| `three.module-*.js` (lazy) | 608,676 | 149,527 | +8,835 |
+
+Assets (separate requests, only when the renderer needs them): `operator-rifle.glb` 159.9 KB,
+`enemy.glb` 213.0 KB, plus the two sprite WebPs (see `docs/assets.md`).
+
+**Checks:** `tsc --noEmit` clean, 318/318 unit tests in 28 files (`actorMotion.test.ts`,
+`spritePose.test.ts`, model cases in `actorScene.test.ts`; `frameView.test.ts` allows
+`render/actorSprites.ts` as a Pixi renderer file). `verify-dist: OK (6 level(s) …)`.
+`MODEL_SCALE` (2.6) and `SPRITE_CM_PER_PX` (2.6) were tuned in the browser for the split-screen
+replay (1000 × 820, `/?auto&seed=42`): at 2 / 2 the actors were dots there and the fall was hard to
+see. 3 (3D) merged the PRO panel's enemies on site A into one blob; 2.6 keeps them separate figures.
+In 2D, 2.4 and 2.8 overlap about the same (the recorded enemies stand within ~1 m of each other and
+of the spike), so 2.6 is the middle. A replay-only camera zoom was not added: the fitted map already
+spans the panel width in both renderers, so any zoom would crop the map. 1.6 / 1.4 left YOU small
+inside its glow.
+
+## Walk animation
+
+Moving actors walk instead of only bobbing. The characters are now the CC0 Quaternius Soldier
+(player, with an AK) and Enemy (with an SMG), see `docs/assets.md`; this is a visible change from
+the earlier Runware models and sprites, which stay as the fallback. From the tilted top-down camera
+the legs are mostly hidden, so the walk mainly reads through the arm swing. With none of the files
+below present the game looks and behaves exactly as before.
+
+**Cycle** (`render/actorMotion.ts`). `MotionSample.cycle` (0..1) advances by the distance travelled,
+one cycle per `WALK_CYCLE_CM` = 380 cm (two footsteps: 2 × `STEP_CM` 190 of the footstep sound, so
+the legs land in step with the audio; asserted in `actorMotion.test.ts`). It is distance-driven, so
+a paused replay freezes the legs while `speed01` decays to idle; a fresh appearance or a jump
+(scrub, `z` shift) resets it to 0, and it stays 0 under `prefers-reduced-motion`. The old bob and
+lean stay for the fallback bodies.
+
+**2D sprite sheets** (`render/actorSprites.ts`, `render/spritePose.ts`). Expected files:
+`sprites/operator-walk.webp` and `sprites/enemy-walk.webp`, a 3 × 3 grid of 256 px cells
+(768 × 768), row-major: cell 0 idle, cells 1..8 the walk cycle. A sheet that is not square with a
+side divisible by 3 (`isSheetSize`) is ignored like a missing one. Each role tries its sheet first and
+falls back silently to the static `operator.webp` / `enemy.webp` (only a missing static sprite logs
+the existing warning). A sheet is one texture source shared by nine frame textures; `liftLevels`
+runs once over the whole sheet, so all cells share the same grey range. `walkFrame(cycle, speed01,
+8)` picks cell 0 below `WALK_MIN_SPEED` (0.08) and cells 1..8 otherwise; with a sheet the ±3 % scale
+bob is off, and reduced motion holds cell 0. Loading stays a plain `<img>` + `ImageSource` (no Pixi
+`Assets`).
+
+**3D rigs** (`render/three3d/actorModels.ts`, `actorScene.ts`). Expected files:
+`models/operator-rifle-rig.glb` and `models/enemy-rig.glb`, each with a `SkinnedMesh` facing +Z and
+an animation clip named `walk` (one full cycle, two steps, looping);
+a clip named `idle` is optional. A rig file that is missing, has no `SkinnedMesh` or no `walk` clip
+is ignored silently. The rig is scaled to `RIG_HEIGHT_CM` = 180 cm (bind-pose bounds) and
+recentred like the static model, then `MODEL_SCALE` = 2.6 (× `PLAYER_RIG_SIZE` = 1.1 for the
+clutcher; both rigs share one body, so the 1.3 `PLAYER_MODEL_SIZE` of the static operator would make
+YOU visibly taller) applies on top.
+
+- **Downs keep the look.** For a role whose rig loads, `bakeRig` bakes the skinned mesh in the idle
+  pose at t = 0 (walk at t = 0 without idle) into a plain `BufferGeometry` (positions, UVs, computed
+  normals) in cm, feet on y = 0, facing +Z. That baked mesh is the role's `ActorModel.geometry`, so
+  downed bodies use the rig model and texture with the existing fall (`FALL_MS`, tip over about X)
+  instead of switching to the old model. The static GLBs are loaded only for a role whose rig is
+  missing or unusable (operator required then, enemy falls back to the operator); with both rigs
+  the Runware GLBs are not requested.
+- **Colour.** The rig palette textures are dark, so `liftTexture` remaps them once on load with
+  `liftLevels` to grey `RIG_FLOOR` (0.62)..1 on a canvas copy, like the sprites. The role tint
+  (YOU cyan, PRO amber, enemies red) and `MODEL_EMISSIVE` then read at about the brightness of the
+  old light-grey models. The 2D walk sheets already go through `liftLevels` (`SPRITE_FLOOR` 0.62).
+- **2D.** Downed sprites use the sheet's idle cell 0 with the down pose (alpha/darken), so they match
+  the standing sheet. `operatorSize(frames)` gives the clutcher `SHEET_OPERATOR_SIZE` = 1.1 with a
+  sheet and the old `OPERATOR_SIZE` = 1.35 with the static sprite. `SPRITE_CM_PER_PX` stays 2.6.
+
+- Each standing slot (1 player + 5 pooled enemies per layer, more if the pool grows) gets its own
+  `SkeletonUtils.clone` (own skeleton, shared geometry) and `AnimationMixer`. The first skinned mesh
+  keeps the name `player-body` / `enemy-body`, uses the layer's tinted `MeshLambertMaterial` (with
+  the rig's base colour texture), casts shadows and has `frustumCulled = false`.
+- Slot hierarchy: group → pivot (yaw) → `*-body-rig` wrapper (bob, lean, model scale) → rig root
+  (unit scale, offset) → skinned mesh.
+- Per frame, for visible slots only: walk time = `cycle × duration`, idle time advances by wall-clock
+  time (capped at 100 ms per frame), walk weight = `speed01 / 0.3` clamped (idle gets the rest;
+  without an idle clip walk stays at weight 1), then `mixer.update(0)`. An action at weight 0 is
+  disabled (`setWeight`), so the mixer skips that clip. No per-frame allocation.
+- Reduced motion: idle (or walk) at t = 0, applied once, no further mixer updates.
+- `ActorLayer.dispose()` calls `stopAllAction` + `uncacheRoot` per mixer and disposes the clones'
+  skeletons; the template scene belongs to the renderer (`disposeActorModels`).
+- The quality-tier shadow recompile marks every `MeshLambertMaterial` for update, which includes the
+  skinned bodies (Lambert supports skinning).
+
+**Sizes** (`pnpm -C web build:public`, gzip = `gzip -9`): entry 127,861 B (+52 for the 2D
+`operatorSize` and `isSheetSize`), `three3d-*.js` 24,173 B (`SkeletonUtils`, the rig code, `bakeRig`,
+`liftTexture`), `three.module-*.js` 153,240 B (the animation system is no longer tree-shaken out).
+Assets: `operator-rifle-rig.glb` 243 KB and `enemy-rig.glb` 189 KB replace the two static GLBs in
+the normal 3D download; the walk sheets replace the static sprites in 2D.
+
+**Checks** (pnpm dev, headed Chrome over CDP, 1000 × 820 and 1440 × 900): `/?auto&seed=42` (3D,
+also `&quality=high` and `&quality=low`) and `/?2d=1&auto&seed=42` give 500 points, 3.7 s / 6.0 s,
+2/3 kills. YOU cyan, PRO amber and enemies red read clearly; the site A enemies of the PRO panel
+stay separate figures at 1000 × 820; downs lie as the same rig model / sheet cell, darkened. The arms
+swing while moving and the bodies return to idle when standing; a paused replay freezes the walk
+cycle (the idle clip keeps breathing by wall clock in 3D; 2D frames are identical); 2× replays 2.6 s
+in ~1.3 s wall time. Low tier: no shadows, no errors. With `*-rig.glb` and `*-walk.webp` blocked
+(CDP `Network.setBlockedURLs`) the Runware models and sprites appear, with no warning and no error.

@@ -16,10 +16,18 @@ import {
   VIEW_HALF,
   VIEW_LEN,
 } from "./actorStyle";
+import { CENTRE, type MuzzleSet, muzzlePoint, muzzleRole } from "./muzzle";
 import type { ActorView, DownView, FrameView, SpikeView } from "./renderer";
 
 export type { SpikeView };
 export { ENEMY_COLOR, PLAYER_COLOR };
+
+export type DrawOpts = {
+  /** false: skip body circles, nose and facing tick (character sprites are drawn instead). */
+  readonly bodies?: boolean;
+  /** Clutcher colour: cyan (default, YOU) or the panel accent (amber for PRO). */
+  readonly playerColor?: number;
+};
 
 /**
  * Shared actor drawing for the live view and the replay (world units, one Graphics cleared per
@@ -48,17 +56,25 @@ function progressArc(g: Graphics, c: Vec2, r: number, frac: number, color: numbe
  * The player: soft glow, aim cone towards `aim` (omitted while the pointer has not aimed yet),
  * body with a light rim and a nose pointing where they aim.
  */
-export function drawPlayer(g: Graphics, p: Vec2, aim: Vec2 | null): void {
-  g.circle(p.x, p.y, PLAYER_R * 1.9).fill({ color: PLAYER_COLOR, alpha: 0.1 });
+export function drawPlayer(g: Graphics, p: Vec2, aim: Vec2 | null, opts: DrawOpts = {}): void {
+  const color = opts.playerColor ?? PLAYER_COLOR;
+  const body = opts.bodies ?? true;
+  g.circle(p.x, p.y, PLAYER_R * 1.9).fill({ color, alpha: 0.1 });
   const dx = aim ? aim.x - p.x : 0;
   const dy = aim ? aim.y - p.y : 0;
   const hasDir = aim !== null && dx * dx + dy * dy > PLAYER_R * PLAYER_R;
   const a = Math.atan2(dy, dx);
   if (hasDir) {
-    cone(g, p, a, AIM_HALF, AIM_LEN, PLAYER_COLOR, 0.12);
-    g.moveTo(p.x, p.y).lineTo(p.x + Math.cos(a) * AIM_LEN, p.y + Math.sin(a) * AIM_LEN).stroke({ width: 10, color: PLAYER_COLOR, alpha: 0.35 });
+    cone(g, p, a, AIM_HALF, AIM_LEN, color, 0.12);
+    g.moveTo(p.x, p.y).lineTo(p.x + Math.cos(a) * AIM_LEN, p.y + Math.sin(a) * AIM_LEN).stroke({ width: 10, color, alpha: 0.35 });
   }
-  g.circle(p.x, p.y, PLAYER_R).fill({ color: PLAYER_COLOR }).stroke({ width: 18, color: BODY_EDGE });
+  // Without bodies a sprite stands here and shows its own facing: no circle, no nose.
+  // A role-coloured footing ring keeps YOU / PRO findable at a glance on small screens.
+  if (!body) {
+    g.circle(p.x, p.y, PLAYER_R * 1.25).fill({ color, alpha: 0.18 }).stroke({ width: 16, color, alpha: 0.85 });
+    return;
+  }
+  g.circle(p.x, p.y, PLAYER_R).fill({ color }).stroke({ width: 18, color: BODY_EDGE });
   if (hasDir) {
     const tip = PLAYER_R + 90;
     const base = PLAYER_R + 10;
@@ -76,10 +92,11 @@ export function drawPro(g: Graphics, p: Vec2): void {
 }
 
 /** A live enemy: glow, faint view cone along its facing (fx, fy), body and a facing tick. */
-export function drawEnemy(g: Graphics, e: { x: number; y: number; fx?: number; fy?: number }): void {
+export function drawEnemy(g: Graphics, e: { x: number; y: number; fx?: number; fy?: number }, body = true): void {
   g.circle(e.x, e.y, ENEMY_R * 1.8).fill({ color: ENEMY_COLOR, alpha: 0.12 });
   const hasFacing = e.fx !== undefined && e.fy !== undefined && (e.fx !== 0 || e.fy !== 0);
   if (hasFacing) cone(g, e, Math.atan2(e.fy!, e.fx!), VIEW_HALF, VIEW_LEN, ENEMY_COLOR, 0.1);
+  if (!body) return;
   g.circle(e.x, e.y, ENEMY_R).fill({ color: ENEMY_COLOR }).stroke({ width: 14, color: 0x2a0d10 });
   if (hasFacing) {
     g.moveTo(e.x, e.y).lineTo(e.x + e.fx! * (ENEMY_R + 110), e.y + e.fy! * (ENEMY_R + 110)).stroke({ width: 22, color: BODY_EDGE, alpha: 0.9 });
@@ -93,12 +110,18 @@ export function drawDown(g: Graphics, x: number, y: number, color: number = ENEM
   g.stroke({ width: 22, color, alpha: 0.55 });
 }
 
-/** Shot tracer with a soft halo and a hit flash at the end; `fade` 1 → 0 over its lifetime. */
-export function drawTracer(g: Graphics, shot: ShotEvent, fade = 1): void {
+const tracerStart = { x: 0, y: 0 };
+
+/**
+ * Shot tracer with a soft halo and a hit flash at the end; `fade` 1 → 0 over its lifetime. It
+ * starts at the shooter's gun tip from `muzzles` (the character sprites), or at the body centre.
+ */
+export function drawTracer(g: Graphics, shot: ShotEvent, fade = 1, muzzles: MuzzleSet | null = null): void {
   const color = shot.by === "P0" ? PLAYER_TRACER : ENEMY_TRACER;
   const a = Math.max(0, Math.min(1, fade));
-  g.moveTo(shot.from.x, shot.from.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 44, color, alpha: 0.14 * a });
-  g.moveTo(shot.from.x, shot.from.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 12, color, alpha: 0.9 * a });
+  const s = muzzlePoint(shot.from, shot.to, muzzles ? muzzles[muzzleRole(shot.by)] : CENTRE, tracerStart);
+  g.moveTo(s.x, s.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 44, color, alpha: 0.14 * a });
+  g.moveTo(s.x, s.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 12, color, alpha: 0.9 * a });
   if (shot.hit) {
     g.circle(shot.to.x, shot.to.y, 150).fill({ color: 0xffffff, alpha: 0.18 * a });
     g.circle(shot.to.x, shot.to.y, 70).fill({ color, alpha: 0.75 * a });
@@ -128,7 +151,23 @@ export function drawSpike(g: Graphics, sp: Vec2, v: SpikeView): void {
  * One frame from renderer-neutral data: spike, then downs and enemies merged by `z` (stable,
  * downs first on ties), then the player, then tracers. `g` is not cleared here.
  */
-export function drawFrame(g: Graphics, f: FrameView): void {
+export function drawFrame(g: Graphics, f: FrameView, opts: DrawOpts = {}): void {
+  drawFrameUnder(g, f, opts);
+  drawTracers(g, f);
+}
+
+/** Tracers only (drawn above the character sprites, starting at their guns with `muzzles`). */
+export function drawTracers(g: Graphics, f: FrameView, muzzles: MuzzleSet | null = null): void {
+  for (const t of f.tracers) drawTracer(g, t.shot, t.fade, muzzles);
+}
+
+/**
+ * Everything of `drawFrame` except the tracers. With `bodies: false` the body circles, nose and
+ * facing tick are skipped (character sprites stand in); glows, cones and down marks stay.
+ */
+export function drawFrameUnder(g: Graphics, f: FrameView, opts: DrawOpts = {}): void {
+  const body = opts.bodies ?? true;
+  const playerColor = opts.playerColor ?? PLAYER_COLOR;
   if (f.spike) drawSpike(g, f.spike, f.spike);
   const layered: ({ down: DownView } | { enemy: ActorView })[] = [
     ...f.downs.map((down) => ({ down })),
@@ -137,9 +176,8 @@ export function drawFrame(g: Graphics, f: FrameView): void {
   const z = (v: { down: DownView } | { enemy: ActorView }): number => ("down" in v ? v.down.z : v.enemy.z) ?? Infinity;
   layered.sort((a, b) => z(a) - z(b) || 0);
   for (const v of layered) {
-    if ("down" in v) drawDown(g, v.down.x, v.down.y, v.down.side === "player" ? PLAYER_COLOR : ENEMY_COLOR);
-    else drawEnemy(g, v.enemy);
+    if ("down" in v) drawDown(g, v.down.x, v.down.y, v.down.side === "player" ? playerColor : ENEMY_COLOR);
+    else drawEnemy(g, v.enemy, body);
   }
-  if (f.player) drawPlayer(g, f.player, f.player.aim);
-  for (const t of f.tracers) drawTracer(g, t.shot, t.fade);
+  if (f.player) drawPlayer(g, f.player, f.player.aim, opts);
 }

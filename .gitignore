@@ -31,3 +31,7 @@ dist/
 
 .DS_Store
 .idea/
+
+# test runner cache and agent scratch
+web/.vitest/
+.uf-upload-tmp/
