@@ -1,10 +1,11 @@
 import * as THREE from "three";
-import { renderResolution } from "../../game/input";
 import type { MapDef } from "../../maps/types";
 import type { Vec2 } from "../../sim/geom";
 import { THEME_NUM } from "../../ui/theme";
 import { fieldRect, glViewport, panelAt, type Rect } from "../panelLayout";
+import { pixelRatioFor, QUALITY, type QualityTier } from "../quality";
 import type { FrameView, GameRenderer, PanelSpec } from "../renderer";
+import { CONTEXT_LOST } from "../switchable";
 import { ActorLayer } from "./actorScene";
 import { type CameraFit, fitCamera, groundPoint, ndcFromClient } from "./camMath";
 import { makeCanvasLabel } from "./labels";
@@ -12,13 +13,26 @@ import { createLights, placeLights } from "./lights";
 import { buildMapScene, disposeMapScene } from "./mapScene";
 import { PanelHud } from "./panelHud";
 
+/** Shadow-receiving plane: above the floor (Y 0), below the grid (Y 1). */
+const SHADOW_Y = 0.5;
+const SHADOW_OPACITY = 0.35;
+
+export type Three3dOptions = { width: number; height: number; tier?: QualityTier };
+
 /**
  * Optional three.js renderer, loaded lazily via `import()` when `pickRenderer` returns "3d".
+ * Quality tiers: the pixel ratio and shadows can change at runtime (`setQuality`); antialias is
+ * fixed when the WebGL context is created and does not change afterwards.
  */
 export class Three3dRenderer implements GameRenderer {
   readonly kind = "3d" as const;
   readonly canvas: HTMLCanvasElement;
+  onFail?: (reason: string) => void;
   private readonly renderer: THREE.WebGLRenderer;
+  private readonly shadowPlane: THREE.Mesh<THREE.BufferGeometry, THREE.ShadowMaterial>;
+  private tier: QualityTier;
+  private failed = false;
+  private readonly onContextLost = (): void => this.fail(CONTEXT_LOST);
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera();
   private readonly layers: ActorLayer[] = [new ActorLayer()];
@@ -32,17 +46,48 @@ export class Three3dRenderer implements GameRenderer {
   private cssW: number;
   private cssH: number;
 
-  constructor(opts: { width: number; height: number }) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(renderResolution(globalThis.devicePixelRatio));
+  constructor(opts: Three3dOptions) {
+    this.tier = opts.tier ?? "high";
+    this.renderer = new THREE.WebGLRenderer({ antialias: QUALITY[this.tier].antialias, powerPreference: "high-performance" });
+    this.renderer.setPixelRatio(pixelRatioFor(this.tier, globalThis.devicePixelRatio));
     this.renderer.setClearColor(THEME_NUM.bg);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // three r187 still exports PCFSoftShadowMap, but WebGLShadowMap warns and falls back to PCF;
+    // plain PCF with `shadow.radius` gives the soft edge without the warning.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.canvas = this.renderer.domElement;
+    // No preventDefault: a lost context is never restored, the owner swaps to 2D instead.
+    this.canvas.addEventListener("webglcontextlost", this.onContextLost);
     this.cssW = opts.width;
     this.cssH = opts.height;
     this.renderer.setSize(opts.width, opts.height);
-    this.scene.add(this.lights.hemi, this.lights.sun, this.lights.sun.target);
+
+    const planeGeo = new THREE.PlaneGeometry(1, 1);
+    planeGeo.rotateX(-Math.PI / 2);
+    planeGeo.translate(0.5, 0, 0.5);
+    this.shadowPlane = new THREE.Mesh(planeGeo, new THREE.ShadowMaterial({ opacity: SHADOW_OPACITY, depthWrite: false }));
+    this.shadowPlane.name = "shadow-plane";
+    this.shadowPlane.position.y = SHADOW_Y;
+    this.shadowPlane.receiveShadow = true;
+    this.shadowPlane.visible = false;
+
+    this.scene.add(this.lights.hemi, this.lights.sun, this.lights.sun.target, this.shadowPlane);
     this.scene.add(this.layers[0]!.group);
+    this.applyShadows(QUALITY[this.tier].shadows, false);
+  }
+
+  get quality(): QualityTier {
+    return this.tier;
+  }
+
+  /** Pixel ratio, size, HUD textures and shadows for `tier`. Not for per-frame use. */
+  setQuality(tier: QualityTier): void {
+    if (tier === this.tier) return;
+    this.tier = tier;
+    this.renderer.setPixelRatio(pixelRatioFor(tier, globalThis.devicePixelRatio));
+    this.renderer.setSize(this.cssW, this.cssH);
+    this.applyShadows(QUALITY[tier].shadows, true);
+    this.rebuildHud();
   }
 
   /** Panels last passed to `setPanels`. */
@@ -63,6 +108,7 @@ export class Three3dRenderer implements GameRenderer {
     this.map = map;
     this.group = buildMapScene(map, { makeLabel: makeCanvasLabel, cssPxPerUnit: opts.cssPxPerUnit });
     placeLights(this.lights, map.width, map.height);
+    this.shadowPlane.scale.set(map.width, 1, map.height);
     this.scene.add(this.group);
     this.updateFits();
   }
@@ -142,9 +188,15 @@ export class Three3dRenderer implements GameRenderer {
   }
 
   destroy(): void {
+    // Our own forceContextLoss below must not report a failure.
+    this.canvas.removeEventListener("webglcontextlost", this.onContextLost);
+    this.failed = true;
     this.dropMap();
     this.hud.dispose();
-    this.scene.remove(this.lights.hemi, this.lights.sun, this.lights.sun.target);
+    this.scene.remove(this.lights.hemi, this.lights.sun, this.lights.sun.target, this.shadowPlane);
+    this.shadowPlane.geometry.dispose();
+    this.shadowPlane.material.dispose();
+    this.lights.sun.shadow.dispose();
     for (const layer of this.layers) {
       this.scene.remove(layer.group);
       layer.dispose();
@@ -152,6 +204,33 @@ export class Three3dRenderer implements GameRenderer {
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     this.canvas.remove();
+  }
+
+  private fail(reason: string): void {
+    if (this.failed) return;
+    this.failed = true;
+    this.onFail?.(reason);
+  }
+
+  /**
+   * Shadows on the high tier only: the sun and walls/bodies cast, a ShadowMaterial plane above the
+   * unlit floor receives (the floor colour itself never changes). Lit and shadow materials are
+   * flagged for a recompile once when toggled at runtime.
+   */
+  private applyShadows(on: boolean, recompile: boolean): void {
+    this.renderer.shadowMap.enabled = on;
+    this.lights.sun.castShadow = on;
+    this.shadowPlane.visible = on;
+    if (!on && this.lights.sun.shadow.map) {
+      // Free the 2048² depth target; three recreates it if shadows come back on.
+      this.lights.sun.shadow.map.dispose();
+      this.lights.sun.shadow.map = null;
+    }
+    if (!recompile) return;
+    this.scene.traverse((o) => {
+      const m = (o as Partial<THREE.Mesh>).material;
+      if (m instanceof THREE.MeshLambertMaterial || m instanceof THREE.ShadowMaterial) m.needsUpdate = true;
+    });
   }
 
   private dropMap(): void {
@@ -194,6 +273,6 @@ export class Three3dRenderer implements GameRenderer {
   }
 }
 
-export async function createThree3dRenderer(opts: { width: number; height: number }): Promise<Three3dRenderer> {
+export async function createThree3dRenderer(opts: Three3dOptions): Promise<Three3dRenderer> {
   return new Three3dRenderer(opts);
 }

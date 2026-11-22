@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import { KILN } from "../src/maps/kiln";
 import { ATTACK_TINT, DEFENSE_TINT, FLOOR, WALL_FILL } from "../src/render/palette";
-import { createLights, placeLights } from "../src/render/three3d/lights";
+import { createLights, placeLights, SHADOW_MAP_SIZE } from "../src/render/three3d/lights";
 import { buildMapScene, disposeMapScene, type LabelStyle, WALL_HEIGHT } from "../src/render/three3d/mapScene";
 import { polygonCentroid } from "../src/sim/geom";
 import { THEME_NUM } from "../src/ui/theme";
@@ -145,6 +145,30 @@ describe("3D map scene", () => {
     expect(lights.sun.intensity).toBe(1.2);
     expect(lights.sun.position.toArray()).toEqual([map.width * 0.35, Math.max(map.width, map.height), map.height * 1.4]);
     expect(lights.sun.target.position.toArray()).toEqual([map.width / 2, 0, map.height / 2]);
+  });
+
+  it("prepares shadows: walls cast, the sun's shadow camera covers every map corner", () => {
+    const walls = all(scene, "wall");
+    expect(walls.length).toBeGreaterThan(0);
+    expect(walls.every((w) => w.castShadow && !w.receiveShadow)).toBe(true);
+    expect(byName(scene, "floor").castShadow).toBe(false);
+    expect(byName(scene, "floor").receiveShadow).toBe(false);
+    const lights = createLights();
+    placeLights(lights, map.width, map.height);
+    expect(lights.sun.castShadow).toBe(false);
+    expect(lights.sun.shadow.mapSize.toArray()).toEqual([SHADOW_MAP_SIZE, SHADOW_MAP_SIZE]);
+    const cam = lights.sun.shadow.camera;
+    cam.position.copy(lights.sun.position);
+    cam.lookAt(lights.sun.target.position);
+    cam.updateMatrixWorld();
+    for (const [x, z] of [[0, 0], [map.width, 0], [0, map.height], [map.width, map.height]] as const) {
+      for (const y of [0, WALL_HEIGHT]) {
+        const p = new THREE.Vector3(x, y, z).project(cam);
+        expect(Math.abs(p.x), `corner ${x},${y},${z}`).toBeLessThan(1);
+        expect(Math.abs(p.y), `corner ${x},${y},${z}`).toBeLessThan(1);
+        expect(Math.abs(p.z), `corner ${x},${y},${z}`).toBeLessThan(1);
+      }
+    }
   });
 
   it("adds no labels without a factory", () => {

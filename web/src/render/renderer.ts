@@ -1,6 +1,7 @@
 import type { MapDef } from "../maps/types";
 import type { Vec2 } from "../sim/geom";
 import type { ShotEvent } from "../sim/sim";
+import type { QualityTier } from "./quality";
 
 /**
  * Renderer-neutral frame data (types only). Pure builders in `game/frameView.ts` fill these from
@@ -73,4 +74,8 @@ export interface GameRenderer {
   draw(frames: readonly FrameView[]): void;
   screenToWorld(clientX: number, clientY: number): Vec2 | null;
   destroy(): void;
+  /** Optional (3D only): changes pixel ratio and shadows; never called per frame. */
+  setQuality?(tier: QualityTier): void;
+  /** Optional (3D only): set by the owner, called once when the renderer can no longer draw. */
+  onFail?: (reason: string) => void;
 }

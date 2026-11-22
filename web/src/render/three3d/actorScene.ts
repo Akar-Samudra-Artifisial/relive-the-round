@@ -135,6 +135,7 @@ export class ActorLayer {
     const py = DECAL_Y.player;
     const body = this.mesh("player-body", this.geo.cylinder, this.mat.playerBody, 0, 0);
     body.scale.set(PLAYER_R, PLAYER_HEIGHT, PLAYER_R);
+    body.castShadow = true;
     const glow = this.mesh("player-glow", this.geo.disc, this.mat.playerGlow, py, ORDER.player);
     glow.scale.set(PLAYER_R * 1.9, 1, PLAYER_R * 1.9);
     const aimCone = this.mesh("player-aim-cone", this.geo.aimCone, this.mat.aimCone, py + 0.1, ORDER.player);
@@ -210,6 +211,7 @@ export class ActorLayer {
     const ey = DECAL_Y.enemy;
     const body = this.mesh("enemy-body", this.geo.cylinder, this.mat.enemyBody, 0, 0);
     body.scale.set(ENEMY_R, ENEMY_HEIGHT, ENEMY_R);
+    body.castShadow = true;
     const glow = this.mesh("enemy-glow", this.geo.disc, this.mat.enemyGlow, ey, ORDER.actor);
     glow.scale.set(ENEMY_R * 1.8, 1, ENEMY_R * 1.8);
     const cone = this.mesh("enemy-cone", this.geo.viewCone, this.mat.viewCone, ey + 0.2, ORDER.actor);

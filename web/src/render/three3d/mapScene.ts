@@ -179,6 +179,8 @@ export function buildMapScene(map: MapDef, opts: MapSceneOptions = {}): THREE.Gr
     g.rotateX(-Math.PI / 2);
     const mesh = new THREE.Mesh(g, wallMat);
     mesh.name = "wall";
+    // Only used while the renderer has shadows on (high tier).
+    mesh.castShadow = true;
     walls.add(mesh);
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat);
     edges.name = "wall-edges";

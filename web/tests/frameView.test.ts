@@ -192,11 +192,18 @@ describe("proFrame", () => {
 describe("frame view purity", () => {
   it("frame builders, the replay player and renderer types use no renderer libs, DOM or clocks", () => {
     const sources = import.meta.glob(
-      ["../src/game/frameView.ts", "../src/game/replayPlayer.ts", "../src/render/renderer.ts", "../src/render/actorStyle.ts"],
+      [
+        "../src/game/frameView.ts",
+        "../src/game/replayPlayer.ts",
+        "../src/render/renderer.ts",
+        "../src/render/actorStyle.ts",
+        "../src/render/quality.ts",
+        "../src/render/fpsWatchdog.ts",
+      ],
       { query: "?raw", import: "default", eager: true },
     );
     const files = Object.entries(sources);
-    expect(files).toHaveLength(4);
+    expect(files).toHaveLength(6);
     for (const [file, src] of files) {
       expect(String(src), file).not.toMatch(
         /Math\.random|\bDate\b|performance\.now|\bwindow\b|\bdocument\b|pixi|from\s*["']three|import\s*\(?\s*["']three/,

@@ -44,6 +44,16 @@ describe("three.js stays inside render/three3d", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("the renderer switch, quality tiers and fps watchdog import neither pixi nor three", () => {
+    for (const name of ["switchable.ts", "quality.ts", "fpsWatchdog.ts"]) {
+      const src = Object.entries(allSources).find(([p]) => p.endsWith(`/src/render/${name}`))?.[1];
+      expect(src, name).toBeDefined();
+      expect(src, name).not.toMatch(/["']pixi\.js/);
+      expect(src, name).not.toMatch(importsThree);
+      expect(src, name).not.toMatch(/["']\.\.?\/(render\/)?(pixi2d|three3d\/)/);
+    }
+  });
+
   it("gamePage reaches the 3D renderer only via import()", () => {
     const page = Object.entries(allSources).find(([p]) => p.endsWith("/src/game/gamePage.ts"))?.[1] ?? "";
     expect(page).toContain("startGame");

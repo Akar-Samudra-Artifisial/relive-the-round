@@ -435,7 +435,8 @@ its output is unchanged.
 
 **Remaining parity notes:** Lambert-lit 3D bodies differ slightly from flat 2D colours, and 3D
 depth replaces the 2D z-merge for downs and enemies. The 2D renderer's output and default behavior
-are unchanged. Shadows and quality tiers remain Phase 7 work; the CHANGELOG entry remains Phase 8.
+are unchanged. Shadows and quality tiers were added in phase 7 (below); the CHANGELOG entry remains
+Phase 8.
 
 **Chunks** after `pnpm -C web build:public` (gzip = `gzip -9`):
 
@@ -456,3 +457,141 @@ are unchanged. Shadows and quality tiers remain Phase 7 work; the CHANGELOG entr
   cases are covered by `panelLayout` unit tests.
 - `?fps` during the replay: 3D 49–60 fps, 2D 60 fps. No console errors from the app.
 - Known minor difference: the 3D header accent tick and frame are 1 px, while 2D strokes them at 2 px.
+
+## Phase 7 — quality, watchdog, fallback
+
+The 3D renderer (still opt-in with `?3d=1`) gets quality tiers with shadows on the top tier, an FPS
+watchdog that steps the tier down, and a runtime swap to the Pixi 2D renderer when WebGL fails. The
+default 2D path is unchanged: no wrapper, no watchdog.
+
+**Quality tiers** — `web/src/render/quality.ts` (pure, in the purity guard):
+
+| Tier | Max pixel ratio | Antialias | Shadows |
+| --- | ---: | --- | --- |
+| `high` (default) | 2 | yes | yes |
+| `medium` | 1.5 | yes | no |
+| `low` | 1 | no | no |
+
+- `?quality=high|medium|low` picks the starting tier (`parseQuality` / `initialTier`); anything else
+  starts on `high`. `lowerTier` steps high → medium → low → null.
+- `pixelRatioFor(tier, dpr)` = `min(renderResolution(dpr), maxPixelRatio)`, the same [1, 2] clamp
+  as the 2D renderer.
+- `Three3dRenderer` takes the tier in its options. Antialias is only applied when the WebGL context
+  is created and never changes at runtime (a watchdog step to `low` keeps the original antialias).
+  `setQuality(tier)` sets the pixel ratio, re-applies `setSize(cssW, cssH)`, toggles shadows, marks
+  the Lambert and shadow materials `needsUpdate` once and rebuilds the panel HUD (its text textures
+  depend on the pixel ratio). It never runs per frame.
+- `GameRenderer` gains the optional `setQuality?(tier)` and `onFail?(reason)` hooks (types only);
+  the Pixi renderer does not implement them.
+
+**Shadows (high only).**
+
+- `renderer.shadowMap.enabled` and `sun.castShadow` follow the tier. three r187 still exports
+  `PCFSoftShadowMap`, but `WebGLShadowMap` warns and falls back to PCF, so the renderer uses
+  `PCFShadowMap` with `shadow.radius = 3` for the soft edge; the map is 2048 × 2048. Turning
+  shadows off disposes the sun's shadow render target (three recreates it when they come back).
+- `placeLights` fits the sun's orthographic shadow camera around the map on every `loadMap`: half the
+  map diagonal plus 400 cm on each side of the light axis, `near`/`far` = light distance ∓ that
+  radius. A unit test projects every map corner at Y 0 and at wall height into the shadow camera.
+- Walls and the player/enemy bodies cast. Decals, tracers, labels, the spike and the HUD never cast.
+- The unlit floor keeps its exact colour. Shadows land on a separate `ShadowMaterial` plane
+  (opacity 0.35, `depthWrite: false`) at Y 0.5, above the floor and below the grid (Y 1); it is
+  hidden unless shadows are on. Nothing that casts also receives, so there is no self-shadowing
+  acne; the bias is a small -0.0005.
+- With two replay panels the shadow map is rendered once per panel, because each panel shows its
+  own actor layer.
+
+**FPS watchdog** — `web/src/render/fpsWatchdog.ts` (pure, deterministic, in the purity guard, no
+allocation per sample): `createFpsWatchdog(opts?)` with `sample(nowMs)` and
+`reset(nowMs)`.
+
+| Setting | Default |
+| --- | ---: |
+| Warm-up after the first sample and after every reset (ignored) | 3000 ms |
+| Rolling average span | 2000 ms |
+| Slow threshold | < 45 fps |
+| Slow for this long before `"degrade"` | 3000 ms |
+| Frame gap treated as a pause (resets, incl. the warm-up) | ≥ 1000 ms |
+
+- Frame times come from consecutive `nowMs` values, not the frame loop's `deltaMS`: that delta is
+  clamped to `MAX_FRAME_MS` (100 ms), which would make a real 8 fps (125 ms frames) look like
+  10 fps. A steady 8 fps degrades after warm-up + 3 s (unit-tested).
+- `"degrade"` is returned once, then the watchdog resets itself (a new warm-up for the new tier).
+- A gap of 1000 ms or more (a background tab, a debugger pause) is not a sample: it resets the
+  average, the slow timer and the warm-up, so a tab switch never degrades. Zero deltas are ignored.
+- `gamePage.ts` (`feedWatchdog`, one place) feeds the frame clock only while the active renderer
+  is 3D, a frame is actually drawn (play, score, replay; not attract/idle), no swap is pending, and
+  the window is visible and focused (`!document.hidden && document.hasFocus()`). An unfocused but
+  visible window throttles rAF to ~5 fps (150–217 ms gaps, under the 1000 ms gap rule), which would
+  otherwise degrade to 2D. When feeding resumes after a skipped frame it calls `reset(nowMs)`, so
+  the warm-up restarts. On `"degrade"` it
+  calls `setQuality(lowerTier(tier))` and logs `console.info("[3d] quality <old> -> <new>")`; when
+  there is no lower tier it swaps to 2D with the reason `low fps`.
+
+**Runtime 2D fallback** — `web/src/render/switchable.ts` (no pixi or three import):
+`createSwitchableRenderer(primary, makeFallback, onSwap)`.
+
+- It forwards every call to the current renderer and remembers the last `resize`, `loadMap` and
+  `setPanels`.
+- `swapToFallback(reason)` runs once (later calls return the same promise):
+  1. create the fallback (`createPixi2dRenderer`);
+  2. copy `style.visibility` and `oldCanvas.replaceWith(newCanvas)` (only when the old canvas is
+     in the DOM; otherwise the page appends `renderer.canvas`, which is already the new one);
+  3. replay resize → loadMap → setPanels;
+  4. destroy the old renderer;
+  5. log one `console.warn("[3d] falling back to 2D: <reason>")`;
+  6. call `onSwap(newRenderer)`.
+- While the swap is pending, calls are recorded (and replayed), `draw` is skipped and
+  `screenToWorld` returns null.
+- If the fallback cannot be created, it logs one `console.error` and never tries again. For a
+  live primary (`low fps`, a throwing `loadMap` / `draw`) it replays the recorded calls on the
+  primary and keeps forwarding and drawing in 3D. A context loss is tracked as a flag whatever
+  swap is in flight: lost during a pending swap that then fails, or lost after an earlier failed
+  swap, the primary is marked dead (one `console.error`, `draw` stays a no-op; the round itself
+  keeps running).
+- `swapping` (read-only) is true while a swap is pending; `setQuality` is skipped then, so the
+  page neither samples the watchdog nor lowers its tier during a swap (tier and renderer stay in
+  sync, and `__rtr.quality()` reports the real tier).
+- `destroy()` during a pending swap destroys the fallback as soon as it resolves (no `onSwap`).
+- `gamePage.ts` ignores `onSwap` until `Controls` exists (a swap finishing that early needs no
+  rebind: `Controls` is built on `renderer.canvas`, already the new canvas).
+- Triggers: `primary.onFail` (the 3D renderer listens for `webglcontextlost`, without
+  `preventDefault`, and reports once; `destroy` removes that listener before its own
+  `forceContextLoss`), a throwing `primary.loadMap` (the map is loaded on the fallback instead) or a
+  throwing `primary.draw`, and the watchdog's `low fps`.
+- `switchable.ts` is loaded with `import()` together with `three3d.ts`, so it stays out of the
+  entry chunk.
+- **What is preserved:** the round, timer, session, recording, replay player, panels and score
+  screen keep running untouched. `onSwap` rebinds the `Controls` pointer listeners to the new canvas
+  (`Controls.bindCanvas`) and redraws the last live frame on the play and score screens; `show()`
+  keeps working because it reads `renderer.canvas` through the wrapper.
+
+**Dev hooks** (inside the existing `import.meta.env.DEV` `__rtr` block, stripped from the public
+build): `__rtr.loseContext()` triggers `WEBGL_lose_context` on the 3D canvas (returns false when the
+renderer is already 2D); `__rtr.quality()` returns `{ tier, kind }`.
+
+**Chunks** after `pnpm -C web build:public` (gzip = `gzip -9`):
+
+| Chunk | Raw bytes | Gzip bytes |
+| --- | ---: | ---: |
+| `index-*.js` (entry) | 404,209 | 123,872 |
+| `three3d-*.js` (renderer, map, actors, HUD, lights, camera math) | 22,535 | 8,203 |
+| `switchable-*.js` (runtime fallback, lazy) | 1,644 | 831 |
+| `three.module-*.js` | 570,492 | 140,692 |
+
+The entry grows by +1,760 B raw / +761 B gzip over phase 6 (tier parsing, the watchdog and the game
+page wiring). three stays in the lazy chunks. `verify-dist: OK`.
+
+**Checks:**
+
+- `tsc --noEmit` clean, 296/296 unit tests in 26 files (new: `quality.test.ts`,
+  `fpsWatchdog.test.ts`, `switchable.test.ts`, a shadow test in `mapScene.test.ts`, and the guards:
+  `quality.ts` / `fpsWatchdog.ts` in the purity list, `switchable.ts` / `quality.ts` /
+  `fpsWatchdog.ts` import neither pixi nor three), `verify-dist: OK (6 level(s) …)`.
+- Parity `/?auto&seed=42` (2D) vs `/?3d=1&auto&seed=42` (3D): pending browser check.
+- `?quality=high` shadows with unchanged floor colour, `medium` / `low` without shadows, `?fps` per
+  tier in the round and the replay: pending browser check.
+- Watchdog under CPU throttling (tier steps, then 2D) and no step without throttling: pending
+  browser check.
+- `__rtr.loseContext()` mid-round and on the replay screen (one warn, play continues in 2D with
+  working aim, panels and controls, no uncaught errors): pending browser check.

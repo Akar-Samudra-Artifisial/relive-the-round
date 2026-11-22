@@ -1,7 +1,10 @@
 import { mapFor } from "../maps";
+import { createFpsWatchdog } from "../render/fpsWatchdog";
 import { createPixi2dRenderer } from "../render/pixi2d";
+import { initialTier, lowerTier, type QualityTier } from "../render/quality";
 import type { FrameView, GameRenderer } from "../render/renderer";
 import { detectCaps, pickRenderer } from "../render/select";
+import type { SwitchableRenderer } from "../render/switchable";
 import { DEFUSE_S, TICK_HZ } from "../sim/constants";
 import type { Vec2 } from "../sim/geom";
 import { ensureFonts, prefersReducedMotion } from "../ui/fonts";
@@ -91,9 +94,9 @@ class Controls {
   constructor(
     canvas: HTMLCanvasElement,
     screen: () => Screen,
-    toWorld: (clientX: number, clientY: number) => Vec2 | null,
+    private readonly toWorld: (clientX: number, clientY: number) => Vec2 | null,
     private readonly touch: TouchControls,
-    touchActive: () => boolean,
+    private readonly touchActive: () => boolean,
   ) {
     addEventListener("keydown", (e) => {
       this.keys.add(e.code);
@@ -106,9 +109,15 @@ class Controls {
       this.firing = false;
       touch.release();
     });
-    const ignored = (e: PointerEvent): boolean => e.pointerType === "touch" && touchActive();
+    addEventListener("pointerup", () => (this.firing = false));
+    this.bindCanvas(canvas);
+  }
+
+  /** Pointer aim/fire listeners on the game canvas; called again when the renderer swaps canvases. */
+  bindCanvas(canvas: HTMLCanvasElement): void {
+    const ignored = (e: PointerEvent): boolean => e.pointerType === "touch" && this.touchActive();
     const aimAt = (e: PointerEvent): void => {
-      const w = toWorld(e.clientX, e.clientY);
+      const w = this.toWorld(e.clientX, e.clientY);
       if (!w) return;
       this.aimWorld = w;
       this.hasAimed = true;
@@ -122,7 +131,6 @@ class Controls {
       aimAt(e);
       this.firing = true;
     });
-    addEventListener("pointerup", () => (this.firing = false));
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   }
 
@@ -141,14 +149,28 @@ function randomSeed(): number {
   return a[0]!;
 }
 
-/** Lazily loads the three.js renderer; any import or WebGL init error warns once and falls back to Pixi 2D. */
-async function create3dOr2d(size: number): Promise<GameRenderer> {
+/**
+ * Lazily loads the three.js renderer; any import or WebGL init error warns once and falls back to
+ * Pixi 2D. A working 3D renderer is wrapped so it can still swap to 2D at runtime.
+ */
+async function create3dOr2d(
+  size: number,
+  tier: QualityTier,
+  onSwap: (next: GameRenderer) => void,
+): Promise<{ renderer: GameRenderer; switchable: SwitchableRenderer | null }> {
+  const make2d = (): Promise<GameRenderer> => createPixi2dRenderer({ width: size, height: size });
   try {
-    const { createThree3dRenderer } = await import("../render/three3d/three3d");
-    return await createThree3dRenderer({ width: size, height: size });
+    // The runtime switch only matters for 3D, so it stays out of the entry chunk too.
+    const [{ createThree3dRenderer }, { createSwitchableRenderer }] = await Promise.all([
+      import("../render/three3d/three3d"),
+      import("../render/switchable"),
+    ]);
+    const primary = await createThree3dRenderer({ width: size, height: size, tier });
+    const switchable = createSwitchableRenderer(primary, make2d, onSwap);
+    return { renderer: switchable, switchable };
   } catch (err) {
     console.warn("[renderer] 3D unavailable, falling back to 2D", err);
-    return createPixi2dRenderer({ width: size, height: size });
+    return { renderer: await make2d(), switchable: null };
   }
 }
 
@@ -174,8 +196,14 @@ export async function startGame(): Promise<void> {
   const stageEl = el<HTMLDivElement>("gameStage");
   // Leaves room for the HUD strip above the canvas; CSS scales the canvas down on narrow screens.
   const size = Math.max(480, Math.min(innerWidth - 24, innerHeight - 104));
-  const renderer: GameRenderer =
-    rendererPick.kind === "3d" ? await create3dOr2d(size) : await createPixi2dRenderer({ width: size, height: size });
+  let tier = initialTier(location.search);
+  // A swap can finish before `controls` exists; the canvas appended below is already the current one.
+  let ready = false;
+  const { renderer, switchable }: { renderer: GameRenderer; switchable: SwitchableRenderer | null } =
+    rendererPick.kind === "3d"
+      ? await create3dOr2d(size, tier, (next) => onRendererSwap(next))
+      : { renderer: await createPixi2dRenderer({ width: size, height: size }), switchable: null };
+  const watchdog = switchable ? createFpsWatchdog() : null;
   stageEl.appendChild(renderer.canvas);
 
   const attract = el<HTMLDivElement>("attract");
@@ -192,6 +220,7 @@ export async function startGame(): Promise<void> {
   const touchForced = params.get("touch") === "1";
   let touchActive = touchForced || matchMedia("(pointer: coarse)").matches;
   const controls = new Controls(renderer.canvas, () => screen, (x, y) => renderer.screenToWorld(x, y), touchControls, () => touchActive);
+  ready = true;
   let session: Session | null = null;
   let pilot: Autopilot | null = null;
   let playStartedMs = 0;
@@ -828,6 +857,45 @@ export async function startGame(): Promise<void> {
     return { world, s };
   };
 
+  /** The 3D renderer was replaced by 2D: the round, session, replay and panels carry on untouched. */
+  function onRendererSwap(next: GameRenderer): void {
+    if (!ready) return;
+    controls.bindCanvas(next.canvas);
+    if ((screen === "play" || screen === "score") && lastLive) renderer.draw([lastLive]);
+  }
+
+  /** Watchdog verdict: one quality tier down, or 2D once the lowest tier is still too slow. */
+  const degradeQuality = (): void => {
+    if (switchable?.swapping) return;
+    const next = lowerTier(tier);
+    if (!next) {
+      void switchable?.swapToFallback("low fps");
+      return;
+    }
+    console.info(`[3d] quality ${tier} -> ${next}`);
+    tier = next;
+    renderer.setQuality?.(next);
+  };
+
+  /**
+   * Feeds the watchdog only while 3D is actually drawing in a visible, focused window: an unfocused
+   * window throttles rAF (~5 fps) without hiding the page. Resuming after a skip restarts the warm-up.
+   */
+  let watchdogPaused = true;
+  const feedWatchdog = (nowMs: number, drawing: boolean): void => {
+    if (!watchdog || !switchable || renderer.kind !== "3d") return;
+    if (!drawing || switchable.swapping || document.hidden || !document.hasFocus()) {
+      watchdogPaused = true;
+      return;
+    }
+    if (watchdogPaused) {
+      watchdogPaused = false;
+      watchdog.reset(nowMs);
+      return;
+    }
+    if (watchdog.sample(nowMs) === "degrade") degradeQuality();
+  };
+
   // The only animation loop on the page: game logic, replay playback, one render, then the HUD.
   const loop = createFrameLoop((deltaMS, nowMs) => {
     fpsAcc += deltaMS;
@@ -837,11 +905,11 @@ export async function startGame(): Promise<void> {
       fpsAcc = 0;
       fpsFrames = 0;
     }
-
     const played = step(deltaMS, nowMs);
     replay?.update(deltaMS);
     // The canvas is hidden on the attract and idle screens; the score screen keeps the last live frame.
     const frames = screen === "replay" && replay ? replay.frames() : (screen === "play" || screen === "score") && lastLive ? [lastLive] : null;
+    feedWatchdog(nowMs, frames !== null);
     if (frames) renderer.draw(frames);
     if (played) updateHud(played.world, played.s);
   });
@@ -859,6 +927,13 @@ export async function startGame(): Promise<void> {
         shareUrl: () => shareUrl,
         challenge: () => pending?.challenge ?? null,
         kiosk: () => ({ ...kiosk, lastActivityMs, savedAtMs, idleSlide: screen === "idle" ? idleSlide : null }),
+        loseContext: (): boolean => {
+          if (renderer.kind !== "3d") return false;
+          const ext = renderer.canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context");
+          ext?.loseContext();
+          return ext != null;
+        },
+        quality: () => ({ tier, kind: renderer.kind }),
       },
     });
   }
