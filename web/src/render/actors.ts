@@ -16,7 +16,7 @@ import {
   VIEW_HALF,
   VIEW_LEN,
 } from "./actorStyle";
-import { CENTRE, type MuzzleSet, muzzlePoint, muzzleRole } from "./muzzle";
+import { CENTRE, muzzlePoint, type TracerOrigin } from "./muzzle";
 import type { ActorView, DownView, FrameView, SpikeView } from "./renderer";
 
 export type { SpikeView };
@@ -114,12 +114,12 @@ const tracerStart = { x: 0, y: 0 };
 
 /**
  * Shot tracer with a soft halo and a hit flash at the end; `fade` 1 → 0 over its lifetime. It
- * starts at the shooter's gun tip from `muzzles` (the character sprites), or at the body centre.
+ * starts at the shooter's gun tip from `origin` (the character sprites), or at the body centre.
  */
-export function drawTracer(g: Graphics, shot: ShotEvent, fade = 1, muzzles: MuzzleSet | null = null): void {
+export function drawTracer(g: Graphics, shot: ShotEvent, fade = 1, origin: TracerOrigin | null = null): void {
   const color = shot.by === "P0" ? PLAYER_TRACER : ENEMY_TRACER;
   const a = Math.max(0, Math.min(1, fade));
-  const s = muzzlePoint(shot.from, shot.to, muzzles ? muzzles[muzzleRole(shot.by)] : CENTRE, tracerStart);
+  const s = origin ? origin.tracerStart(shot, tracerStart) : muzzlePoint(shot.from, shot.to, CENTRE, tracerStart);
   g.moveTo(s.x, s.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 44, color, alpha: 0.14 * a });
   g.moveTo(s.x, s.y).lineTo(shot.to.x, shot.to.y).stroke({ width: 12, color, alpha: 0.9 * a });
   if (shot.hit) {
@@ -156,9 +156,9 @@ export function drawFrame(g: Graphics, f: FrameView, opts: DrawOpts = {}): void 
   drawTracers(g, f);
 }
 
-/** Tracers only (drawn above the character sprites, starting at their guns with `muzzles`). */
-export function drawTracers(g: Graphics, f: FrameView, muzzles: MuzzleSet | null = null): void {
-  for (const t of f.tracers) drawTracer(g, t.shot, t.fade, muzzles);
+/** Tracers only (drawn above the character sprites, starting at their guns with `origin`). */
+export function drawTracers(g: Graphics, f: FrameView, origin: TracerOrigin | null = null): void {
+  for (const t of f.tracers) drawTracer(g, t.shot, t.fade, origin);
 }
 
 /**

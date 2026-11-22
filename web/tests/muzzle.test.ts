@@ -7,11 +7,14 @@ import {
   modelMuzzle,
   MUZZLE_MODEL,
   MUZZLE_RIG,
+  MUZZLE_SHEET_CELLS_PX,
   MUZZLE_SHEET_PX,
   MUZZLE_SPRITE_PX,
   muzzlePoint,
   muzzleRole,
   spriteMuzzles,
+  spriteTipPoint,
+  spriteTips,
 } from "../src/render/muzzle";
 import { SHEET_OPERATOR_SIZE, SPRITE_CM_PER_PX } from "../src/render/spritePose";
 import type { ActorModels } from "../src/render/three3d/actorModels";
@@ -67,6 +70,24 @@ describe("muzzle sets per art", () => {
     for (const set of [MUZZLE_RIG, MUZZLE_MODEL, MUZZLE_SHEET_PX, MUZZLE_SPRITE_PX]) {
       for (const tip of [set.player, set.enemy]) expect(tip.forward).toBeGreaterThan(Math.abs(tip.side));
     }
+  });
+
+  it("has a tip for every walk cell, the idle one first", () => {
+    for (const role of ["player", "enemy"] as const) {
+      expect(MUZZLE_SHEET_CELLS_PX[role]).toHaveLength(9);
+      expect(MUZZLE_SHEET_PX[role]).toBe(MUZZLE_SHEET_CELLS_PX[role][0]);
+      for (const tip of MUZZLE_SHEET_CELLS_PX[role]) expect(tip.forward).toBeGreaterThan(Math.abs(tip.side));
+      expect(spriteTips(role, 9)).toBe(MUZZLE_SHEET_CELLS_PX[role]);
+      expect(spriteTips(role, 1)).toEqual([MUZZLE_SPRITE_PX[role]]);
+    }
+  });
+
+  it("rotates and scales a sprite tip like the sprite (y-down, facing +X)", () => {
+    const tip = { forward: 100, side: 20, height: 0 };
+    expect(spriteTipPoint(10, 10, 0, 2, tip)).toEqual({ x: 210, y: 50 });
+    const p = spriteTipPoint(0, 0, Math.PI / 2, 1, tip);
+    expect(p.x).toBeCloseTo(-20, 9);
+    expect(p.y).toBeCloseTo(100, 9);
   });
 
   it("scales the model tips by the body scale", () => {

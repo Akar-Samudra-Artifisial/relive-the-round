@@ -34,14 +34,24 @@ them how the pro solved it. Short, readable and easy to share is what makes it w
 ## What it does
 
 - **Six real clutch rounds.** Each level is a 1vN clutch from pro VALORANT esports data (2025-2026),
-  rebuilt on an original 2D map: 3 levels on **Kiln** and 3 on **Cistern**. You take over the clutcher
+  rebuilt on an original map: 3 levels on **Kiln** and 3 on **Cistern**. You take over the clutcher
   while the 2-3 enemies move on rails derived from the recorded positions, driven by a bot state machine
   (rail → hunt → retake/defuse).
+- **3D by default.** A three.js renderer (lazy-loaded, quality tiers, FPS watchdog) draws the map, the
+  characters, the bullet tracers and the spike. `?2d=1` forces the PixiJS 2D renderer, and browsers
+  without WebGL2 get 2D automatically.
+- **Walking characters.** Player and enemies are rigged characters whose walk cycle is driven by the
+  distance travelled, so the legs land in step with the footstep sound and freeze when the replay is
+  paused. The 2D renderer uses matching sprite sheets. Tracers start at the gun muzzle.
+- **Sound with no audio files.** Shots, footsteps (enemy steps are audible through the fog), hits,
+  kills, buttons, defuse, explosion and win/lose are synthesized with the Web Audio API, plus a
+  generative music loop. Mute from the button or the `M` key; the choice is remembered.
 - **Kiosk loop.** Pick a round or press Enter for a random one, play it (WASD to move, mouse to aim,
-  click to shoot, hold E on the spike to defuse), get a score, enter 3 initials for the local leaderboard.
+  click to shoot, hold E on the spike to defuse; the player runs 15% faster than the bots, 620 vs
+  540 cm/s), get a score, enter 3 initials for the local leaderboard.
 - **You vs the pro replay.** After the round, a two-panel replay plays your movement and the pro's
   recorded movement side by side (play/pause, 1×/2×/4×, seek).
-- **Score card + QR.** A downloadable PNG score card compares you with the pro and carries a QR code.
+- **Score card + QR.** A downloadable PNG score card compares you with the pro and carries a QR code that fills its box so it scans easily.
 - **Challenge link.** The QR opens `/#c=…` on a phone: the same round, with the challenger's score to beat.
 
 ## How we built it
@@ -57,16 +67,27 @@ them how the pro solved it. Short, readable and easy to share is what makes it w
 - **Original maps from aggregates:** Kiln and Cistern use our own geometry. A warp places the recorded
   tracks on them, calibrated with aggregate anchors: site plant medians, spawns, callouts and density
   hotspots (for haven → Kiln: 8,610 rounds and 1,736,208 position samples, `docs/calibration-haven.md`).
-- **Game client (TypeScript, Vite, PixiJS 8):** a deterministic fixed-tick simulation with navmesh
+- **Game client (TypeScript, Vite):** a deterministic fixed-tick simulation with navmesh
   pathfinding, bot state machine, line-of-sight checks and spike timer/defuse rules; a replay model;
-  a canvas score card; QR codes via `qrcode-generator`.
+  a canvas score card; QR codes via `qrcode-generator`. Both renderers sit behind one `GameRenderer`
+  interface and read the same pure frame views: **three.js** (3D, lazy chunk, scissor viewports for
+  the two-panel replay) and **PixiJS 8** (2D fallback), so the simulation never touches rendering
+  (`docs/3d-renderer.md`).
+- **Sound (Web Audio):** every effect and the music are synthesized at runtime from oscillators and
+  noise, scheduled from the single frame loop. No audio files, no samples, no external requests, so
+  nothing to license and nothing to download (`docs/audio.md`).
+- **Art and characters:** menu and map thumbnails and our first character models and sprites were made
+  with Runware image/3D generation (`docs/assets.md`). The final walking characters are the CC0
+  Quaternius Toon Shooter Game Kit soldier and enemy, optimised locally (about 4,000 triangles and
+  under 250 KB per model) with 2D sprite sheets rendered from them.
 - **Ship it safely:** `pnpm -C web build:public` copies only the 6 featured levels and then checks
   `dist/`: no calibration data, no raw GRID UUIDs, no e-mail addresses, no local paths, no debug page.
   Vercel serves a prebuilt output (never built from Git), with a strict CSP (`script-src 'self'`,
   no `unsafe-eval`, `frame-ancestors 'none'`).
 - **Tooling:** WebStorm 2026.3 with Junie (JetBrains' coding agent) planned, implemented and tested
   kiosk mode, level schema v2, link previews and touch controls (see the Tooling section and
-  `AI_SHOWCASE.md`).
+  `AI_SHOWCASE.md`). The 3D renderer, character art, sound and walk animation were built later
+  with other AI coding agents, with Runware for the art; those are not claimed for the Junie bonus.
 
 ## Challenges we ran into
 
@@ -79,6 +100,15 @@ them how the pro solved it. Short, readable and easy to share is what makes it w
   a defuse attempt is audible and pulls nearby enemies.
 - **Original maps without losing the data.** Recorded coordinates belong to a different map. We
   warp them onto our own layouts using aggregate anchors, so sites, spawns and routes still line up.
+- **Rigging characters.** Auto-rigging our generated models was a paid service we declined. We used a
+  free CC0 rigged character pack instead and drive the walk with a distance-based cycle, tuned so one
+  cycle equals two footsteps of the footstep sound. The tilted top-down camera hides the legs, so the
+  walk mostly reads through the arm swing.
+- **Sound without assets.** We wanted audio without shipping files or risking copyright, so everything
+  is synthesized: tiny, licence-free, and it keeps the strict CSP (`default-src 'self'`). Browsers only
+  start audio after a gesture, so the engine loads lazily on the first click or key.
+- **3D without hurting weak devices.** The renderer is a lazy chunk with quality tiers and an FPS
+  watchdog that drops to the 2D renderer when frames are slow.
 - **Licensed data on a public site.** The data cannot be committed. Levels exist only on the build
   machine, a guard hook blocks commits, and the public build verifies its own output before upload.
 
@@ -87,7 +117,7 @@ them how the pro solved it. Short, readable and easy to share is what makes it w
 - 6 playable rounds, each one a real clutch that a pro won, on two original maps.
 - The two-panel "you vs pro" replay: the moment a player sees where their route differs from the pro's.
 - An event loop that works end to end: attract → play → score → replay → card → phone challenge.
-- 202 automated tests (151 web, 51 ETL) and a public build that fails if any data it should not
+- 450 automated tests (399 web, 51 ETL) and a public build that fails if any data it should not
   ship ends up in `dist/`.
 
 ## What we learned
@@ -107,8 +137,8 @@ them how the pro solved it. Short, readable and easy to share is what makes it w
 
 ## Built with
 
-python, uv, pytest, typescript, vite, pixi.js, vitest, ajv, qrcode-generator, json-schema, vercel,
-grid, webstorm, junie
+python, uv, pytest, typescript, vite, three.js, pixi.js, webgl, web-audio-api, vitest, ajv,
+qrcode-generator, json-schema, vercel, grid, webstorm, junie, runware
 
 ## Try it out
 
@@ -121,8 +151,8 @@ grid, webstorm, junie
 Judges, no install needed:
 
 1. Open https://relive-the-round.vercel.app on a desktop browser (keyboard + mouse).
-2. Press Enter for a random round, or pick one of the 6 rounds.
-3. Controls: WASD move · mouse aim · click shoot · hold E on the spike to defuse · Esc quit.
+2. Turn the sound on (it starts after your first click or key; `M` mutes). Press Enter for a random round, or pick one of the 6 rounds.
+3. Controls: WASD move · mouse aim · click shoot · hold E on the spike to defuse · Esc quit · M mute sound.
 4. After the round: watch the replay (Space play/pause, 1/2/4 speed, ← → seek), type 3 initials
    and press Enter to save, then download the score card.
 5. Scan the QR on the card with a phone (or open the `/#c=…` link) to get the same round as a
@@ -131,7 +161,7 @@ Judges, no install needed:
 From source (code only; the licensed data is not in the repo):
 
 ```sh
-pnpm -C web install && pnpm -C web test     # 151 tests
+pnpm -C web install && pnpm -C web test     # 399 tests
 pnpm -C web dev                              # http://localhost:5177; without the data the
                                              # rounds use a synthetic fixture level
 cd etl && uv run pytest                      # 51 tests
@@ -178,8 +208,21 @@ and `docs/deploy.md`.
   `verify-dist` rejects UUIDs, e-mails, local paths, calibration data and raw data formats.
   TODO(user): confirm with the organizers that hosting 6 derived level files publicly is allowed.
 - **Original presentation:** game name, maps (Kiln, Cistern), map geometry, favicon and UI are our own;
-  no Riot map art, geometry, agents, logos or audio. The game has no audio assets.
+  no Riot map art, geometry, agents, logos or audio. All sound is synthesized in the browser; there
+  are no audio files.
 - **Video:** no third-party trademarks or logos, no copyrighted music (see `docs/demo-video-script.md`).
+
+## Credits & licences
+
+- **Characters:** Quaternius "Toon Shooter Game Kit" (https://quaternius.com/packs/toonshootergamekit.html),
+  CC0 (public domain). The glTF files came from the Poly Pizza mirror
+  (https://poly.pizza/m/PpLF4rt4ah `Character Soldier`, https://poly.pizza/m/mdGe4IN31v `Character
+  Enemy`, both CC0). No attribution is required; credit: Quaternius. We merged meshes, baked a palette
+  texture and simplified them locally (`docs/assets.md`).
+- **Menu background, map thumbnails, first character models and sprites:** generated with Runware
+  (`docs/assets.md` lists model, prompts and sizes); original, generic prompts.
+- **Fonts:** Chakra Petch and JetBrains Mono, SIL OFL, self-hosted.
+- **Sound and music:** synthesized in code; no samples, no third-party music.
 
 ## Submission checklist
 
@@ -210,3 +253,13 @@ and `docs/deploy.md`.
     shown in the UI.
   - The UI says "spike" and "Pro #1" (`web/src/game/levels.ts:57-61`, `web/src/game/gamePage.ts:311`).
     Both are generic terms; no player is named.
+
+## TODO: screenshots and video to capture (after the polish pass)
+
+- [ ] TODO(user): walking characters in 3D (live round, mid-stride, enemies visible)
+- [ ] TODO(user): the same moment in the 2D renderer (`?2d=1`) with the sprite-sheet characters
+- [ ] TODO(user): two-panel replay split (YOU vs PRO) in 3D
+- [ ] TODO(user): score screen with the QR code filling its box, and the downloaded score card
+- [ ] TODO(user): mute button (and the `M` key hint) visible in the HUD
+- [ ] TODO(user): bullet tracer leaving the gun muzzle
+- [ ] TODO(user): video: show sound on (shots, footsteps, defuse) and the mute toggle; no copyrighted music

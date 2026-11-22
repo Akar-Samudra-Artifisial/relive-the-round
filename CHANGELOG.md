@@ -40,8 +40,10 @@ Semua perubahan penting dicatat di sini. Format mengikuti Keep a Changelog, vers
 - Halaman debug (`?debug`) hanya ada di build dev; tidak ikut bundel produksi.
 
 ### Fixed
+- 2D bullet tracers now leave the gun tip of the sprite as drawn (its heading, walk cell and size), standing and moving, for the player and enemies; they started up to about 15 px past or beside the barrel because the tip was placed along the shot direction with the idle pose only.
+- The QR code on the score screen and the score card keeps the standard 4-module quiet zone (the white padding of the score-screen QR counts towards it) while still filling its box as far as that allows.
 - Bullet tracers now start at the gun muzzle of the character (3D models and 2D sprites, live round and replay) instead of the body centre; in 3D the tracer is drawn at barrel height. In the replay, YOU turns to face its own shots so the gun lines up with the tracer.
-- The QR code on the score screen and the downloadable score card now fills its box (2-module quiet zone) instead of sitting small in the middle.
+- The QR code on the score screen and the downloadable score card now fills its box instead of sitting small in the middle.
 - Garis bidik tidak lagi tergambar dari pojok kiri-atas canvas sebelum pointer pernah digerakkan atau ditekan di canvas.
 - Batas waktu replay (45 s) kembali ke layar skor, bukan ke attract, sehingga skor yang belum disimpan tidak hilang.
 - Menahan Enter pada tombol "Watch replay"/"Beat this" tidak lagi memicu klik berulang.
