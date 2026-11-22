@@ -196,7 +196,7 @@ export async function startGame(): Promise<void> {
   const stageEl = el<HTMLDivElement>("gameStage");
   // Leaves room for the HUD strip above the canvas; CSS scales the canvas down on narrow screens.
   const size = Math.max(480, Math.min(innerWidth - 24, innerHeight - 104));
-  let tier = initialTier(location.search);
+  let tier = initialTier(location.search, { coarse: matchMedia("(pointer: coarse)").matches });
   // A swap can finish before `controls` exists; the canvas appended below is already the current one.
   let ready = false;
   const { renderer, switchable }: { renderer: GameRenderer; switchable: SwitchableRenderer | null } =

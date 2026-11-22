@@ -24,8 +24,9 @@ export function parseQuality(search: string): QualityTier | null {
   return q === "high" || q === "medium" || q === "low" ? q : null;
 }
 
-export function initialTier(search: string): QualityTier {
-  return parseQuality(search) ?? "high";
+/** `?quality=` wins; otherwise coarse pointers (phones/tablets) start at "medium", others "high". */
+export function initialTier(search: string, opts?: { coarse?: boolean }): QualityTier {
+  return parseQuality(search) ?? (opts?.coarse ? "medium" : "high");
 }
 
 /** high → medium → low → null (nothing left to drop). */

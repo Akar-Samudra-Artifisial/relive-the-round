@@ -226,7 +226,7 @@ with Pixi 2D.
 ## Phase 4 — static map
 
 A three.js `GameRenderer` that draws the static map with the phase 3 camera. It is opt-in
-(`?3d=1` with WebGL2) and loaded lazily. Without `3d`, the game is unchanged.
+(`?3d=1` with WebGL2, until phase 8) and loaded lazily. Without `3d`, the game is unchanged.
 
 - `web/src/render/palette.ts` (pure, only imports `ui/theme`): the map palette (`FLOOR`,
   `GRID_MINOR`, `GRID_MAJOR`, `WALL_FILL`, `ATTACK_TINT`, `DEFENSE_TINT`) and the label sizes
@@ -411,7 +411,7 @@ The entry grows by +40 B raw / +13 B gzip over phase 4: only the constants moved
 ## Phase 6 — replay viewports
 
 The 3D renderer now honours every `PanelSpec`. Replay fields use independent scissor viewports,
-camera fits and actor layers in the shared WebGL canvas. The 2D renderer remains the default and
+camera fits and actor layers in the shared WebGL canvas. The 2D renderer remains the default (until phase 8) and
 its output is unchanged.
 
 - `web/src/render/panelLayout.ts` is the pure shared geometry module. `pixi2d.ts` uses its
@@ -435,7 +435,7 @@ its output is unchanged.
 
 **Remaining parity notes:** Lambert-lit 3D bodies differ slightly from flat 2D colours, and 3D
 depth replaces the 2D z-merge for downs and enemies. The 2D renderer's output and default behavior
-are unchanged. Shadows and quality tiers were added in phase 7 (below); the CHANGELOG entry remains
+(2D, until phase 8) are unchanged. Shadows and quality tiers were added in phase 7 (below); the CHANGELOG entry remains
 Phase 8.
 
 **Chunks** after `pnpm -C web build:public` (gzip = `gzip -9`):
@@ -460,9 +460,9 @@ Phase 8.
 
 ## Phase 7 — quality, watchdog, fallback
 
-The 3D renderer (still opt-in with `?3d=1`) gets quality tiers with shadows on the top tier, an FPS
+The 3D renderer (still opt-in with `?3d=1`, until phase 8) gets quality tiers with shadows on the top tier, an FPS
 watchdog that steps the tier down, and a runtime swap to the Pixi 2D renderer when WebGL fails. The
-default 2D path is unchanged: no wrapper, no watchdog.
+default 2D path (until phase 8) is unchanged: no wrapper, no watchdog.
 
 **Quality tiers** — `web/src/render/quality.ts` (pure, in the purity guard):
 
@@ -595,3 +595,57 @@ page wiring). three stays in the lazy chunks. `verify-dist: OK`.
   browser check.
 - `__rtr.loseContext()` mid-round and on the replay screen (one warn, play continues in 2D with
   working aim, panels and controls, no uncaught errors): pending browser check.
+
+## Phase 8 — 3D by default
+
+Browsers with WebGL2 now get the 3D renderer without any URL parameter. All phase 7 safety nets
+stay as they are: the lazy `three3d` / `switchable` chunks, the import/init fallback with one
+`console.warn`, the runtime swap to 2D and the FPS watchdog. This supersedes the "default stays 2D"
+notes in the earlier phases.
+
+**Selection rules** — `web/src/render/select.ts` `pickRenderer(search, caps)`, in order:
+
+| Query | WebGL2 | No WebGL2 |
+| --- | --- | --- |
+| `2d=1` or `3d=0` (wins over `3d=1`) | 2d (`forced`) | 2d (`forced`) |
+| `3d=1` or a bare `3d` | 3d (`requested`) | 2d (`no webgl2`) |
+| anything else (no param, `?kiosk=1`, `2d=0`, …) | 3d (`default`) | 2d (`no webgl2`) |
+
+`detectCaps()` is unchanged. A browser without WebGL2 plays 2D silently (no warning). A forced or
+no-WebGL2 2D game takes the same code path as before: no wrapper, no watchdog, and no three chunk
+is requested. The phase 0 probe in `web/src/main.ts` is unchanged: it loads whenever a `3d` param
+is present, whatever its value, so `/?3d=0` still fetches the probe chunk (not the renderer).
+
+**How to force 2D:** `/?2d=1` (or `/?3d=0`); both combine with other params, e.g. `/?kiosk=1&2d=1`.
+
+**Starting tier** — `initialTier(search, { coarse })` in `quality.ts` stays pure: `?quality=` wins;
+otherwise coarse pointers (phones/tablets, `matchMedia("(pointer: coarse)")` in `gamePage.ts`)
+start at `medium` (pixel ratio ≤ 1.5, no shadows) and everything else at `high`. The watchdog still
+steps down from there.
+
+**What a default visitor downloads** after `pnpm -C web build:public` (gzip = `gzip -9`): the entry
+chunk, then lazily `three3d` + `switchable` + `three.module` once the game page starts with WebGL2.
+
+| Chunk | Raw bytes | Gzip bytes |
+| --- | ---: | ---: |
+| `index-*.js` (entry) | 404,258 | 123,890 |
+| `three3d-*.js` (renderer, lazy) | 22,535 | 8,204 |
+| `switchable-*.js` (runtime fallback, lazy) | 1,644 | 831 |
+| `three.module-*.js` (lazy) | 570,492 | 140,692 |
+
+The entry grows by +49 B raw / +18 B gzip over phase 7. three stays in the lazy chunks.
+`verify-dist: OK`.
+
+**Checks:**
+
+- `tsc --noEmit` clean, 300/300 unit tests in 26 files (the `select.test.ts` table now covers
+  `""`, `?kiosk=1`, `?3d`, `?3d=1`, `?3d=0`, `?2d=1`, `?2d=0`, `?3d=1&2d=1` with and without WebGL2;
+  `quality.test.ts` covers coarse true/false with and without `?quality=`). `three-lazy.test.ts`
+  passes unchanged. `verify-dist: OK (6 level(s) …)`.
+- Parity `/?auto&seed=42` (now 3D) vs `/?2d=1&auto&seed=42` (2D): the same score card, 500
+  points, 3.7 s / 6.0 s, 2/3 kills.
+- Browser (pnpm dev): `/` renders the 3D canvas (`data-engine="three.js r187"`) and requests the
+  three3d chunk; `/?2d=1` renders Pixi 2D and requests no three chunk; `/?3d=0` renders Pixi 2D
+  and requests only the phase 0 probe chunk. `__rtr.quality()` reports `high` / 3d on desktop,
+  `low` with `?quality=low`, and `medium` under a 390x844 touch emulation (`pointer: coarse`).
+  No application errors in the console. The no-WebGL2 path is covered by `select.test.ts` only.

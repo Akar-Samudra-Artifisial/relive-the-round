@@ -26,6 +26,16 @@ describe("quality tiers", () => {
     expect(initialTier("")).toBe("high");
   });
 
+  it("starts coarse pointers at medium unless ?quality= is given", () => {
+    expect(initialTier("", { coarse: true })).toBe("medium");
+    expect(initialTier("", { coarse: false })).toBe("high");
+    expect(initialTier("", {})).toBe("high");
+    expect(initialTier("?quality=high", { coarse: true })).toBe("high");
+    expect(initialTier("?quality=low", { coarse: true })).toBe("low");
+    expect(initialTier("?quality=medium", { coarse: false })).toBe("medium");
+    expect(initialTier("?quality=bogus", { coarse: true })).toBe("medium");
+  });
+
   it("steps high -> medium -> low -> null", () => {
     expect(lowerTier("high")).toBe("medium");
     expect(lowerTier("medium")).toBe("low");
