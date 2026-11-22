@@ -588,13 +588,25 @@ page wiring). three stays in the lazy chunks. `verify-dist: OK`.
   `fpsWatchdog.test.ts`, `switchable.test.ts`, a shadow test in `mapScene.test.ts`, and the guards:
   `quality.ts` / `fpsWatchdog.ts` in the purity list, `switchable.ts` / `quality.ts` /
   `fpsWatchdog.ts` import neither pixi nor three), `verify-dist: OK (6 level(s) …)`.
-- Parity `/?auto&seed=42` (2D) vs `/?3d=1&auto&seed=42` (3D): pending browser check.
-- `?quality=high` shadows with unchanged floor colour, `medium` / `low` without shadows, `?fps` per
-  tier in the round and the replay: pending browser check.
-- Watchdog under CPU throttling (tier steps, then 2D) and no step without throttling: pending
-  browser check.
-- `__rtr.loseContext()` mid-round and on the replay screen (one warn, play continues in 2D with
-  working aim, panels and controls, no uncaught errors): pending browser check.
+- Parity `/?auto&seed=42` (2D) vs `/?3d=1&auto&seed=42` (3D): identical result card, 500 pts,
+  3.7 s / 6.0 s, 2/3 kills (browser check, Dia).
+- `?quality=high` shadows with unchanged floor colour, `medium` / `low` without shadows: on the
+  paused replay at t=3, high is darker than medium in 16,453 px and lighter nowhere; the floor colour
+  is the same on every tier. `?fps` high / medium / low: 60 / 58 / 60 in the round, 60 on all three
+  in the replay. Screenshots: `docs/ai-showcase/14-3d-phase-7/quality-{high,low}.png`.
+- Watchdog under 6× CPU throttling: `quality high -> medium`, `medium -> low`, then
+  `falling back to 2D: low fps`. Without throttling: no step during a round, tier stays high 16 s.
+- Tab switch on `/?fps`: not verifiable with the agent browser (Dia over CDP). Its background tab
+  reports `document.hidden = false` and `hasFocus() = true` with no blur / visibilitychange, while
+  rAF slows to ~5 fps (150–500 ms gaps, under the 1 s pause threshold), so the watchdog steps down
+  exactly as it would on a genuinely slow device. A real hidden tab sets `document.hidden`, which
+  pauses the watchdog (`gamePage.ts` `feedWatchdog`). Still needs a manual check in a normal browser.
+- `__rtr.loseContext()` on the replay screen: one `[3d] falling back to 2D: WebGL context lost`
+  warn, YOU / PRO panels shown, pause, scrub and 2× speed work, no uncaught errors (three also logs
+  "WEBGL_lose_context extension not supported" after the loss). Mid-round (`/?level=0`): one warn,
+  the round continues in 2D to a normal score card. Aim after the fallback was not verified:
+  synthetic pointer events fire no shot in either renderer. Screenshots:
+  `docs/ai-showcase/14-3d-phase-7/fallback-{replay,round}.png`.
 
 ## Phase 8 — 3D by default
 
